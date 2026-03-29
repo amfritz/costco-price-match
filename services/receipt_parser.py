@@ -211,6 +211,29 @@ def _post_process(items: list) -> list:
     return merged
 
 
+def parse_receipt_image(img_bytes: bytes, fmt: str = "png") -> dict:
+    """Parse receipt from an image (PNG, JPEG, etc.) using Nova Lite."""
+    response = _bedrock.converse(
+        modelId=MODEL_LITE,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"image": {"format": fmt, "source": {"bytes": img_bytes}}},
+                {"text": EXTRACTION_PROMPT},
+            ],
+        }],
+        inferenceConfig={"maxTokens": 4096, "temperature": 0},
+    )
+    text = response["output"]["message"]["content"][0]["text"]
+    if "```" in text:
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    result = json.loads(text.strip())
+    result["items"] = _post_process(result.get("items", []))
+    return result
+
+
 def parse_receipt_pdf(pdf_bytes: bytes, model: str = "lite") -> dict:
     """Parse receipt PDF. Lite=fast single-call, Premier=two-call image approach."""
     if model == "premier":

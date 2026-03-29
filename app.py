@@ -40,25 +40,33 @@ def get_config():
     return result
 
 
+IMAGE_EXTENSIONS = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png", ".gif": "gif", ".webp": "webp"}
+
 @app.post("/api/upload")
 async def upload_receipt(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "Only PDF files are supported")
-    pdf_bytes = await file.read()
-    if len(pdf_bytes) > 10 * 1024 * 1024:
+    ext = "." + file.filename.lower().rsplit(".", 1)[-1] if "." in file.filename else ""
+    is_pdf = ext == ".pdf"
+    is_image = ext in IMAGE_EXTENSIONS
+    if not is_pdf and not is_image:
+        raise HTTPException(400, "Supported formats: PDF, JPG, PNG, GIF, WebP")
+    file_bytes = await file.read()
+    if len(file_bytes) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10MB)")
     try:
-        parsed = receipt_parser.parse_receipt_pdf(pdf_bytes)
+        if is_image:
+            parsed = receipt_parser.parse_receipt_image(file_bytes, IMAGE_EXTENSIONS[ext])
+        else:
+            parsed = receipt_parser.parse_receipt_pdf(file_bytes)
     except Exception as e:
         raise HTTPException(500, f"Failed to parse receipt: {e}")
     receipt = db.put_receipt(
         items=parsed.get("items", []),
         receipt_date=parsed.get("receipt_date", ""),
         store=parsed.get("store", ""),
-        pdf_hash=hashlib.md5(pdf_bytes).hexdigest(),
+        pdf_hash=hashlib.md5(file_bytes).hexdigest(),
     )
-    # Store PDF in S3 for potential reparse
-    db.upload_pdf(receipt["receipt_id"], pdf_bytes)
+    # Store original file in S3 for potential reparse
+    db.upload_pdf(receipt["receipt_id"], file_bytes)
     return {"receipt": receipt, "parsed_items": len(receipt["items"])}
 
 
@@ -141,6 +149,47 @@ def update_item(receipt_id: str, index: int, item: dict = Body(...)):
     if not rc or index < 0 or index >= len(rc.get("items", [])):
         raise HTTPException(404, "Item not found")
     db.update_receipt_item(receipt_id, index, item)
+    return {"ok": True}
+
+
+@app.put("/api/receipt/{receipt_id}")
+def update_receipt_meta(receipt_id: str, body: dict = Body(...)):
+    rc = db.get_receipt(receipt_id)
+    if not rc:
+        raise HTTPException(404, "Receipt not found")
+    updates = "SET "
+    values = {}
+    names = {}
+    parts = []
+    if "store" in body:
+        parts.append("#store = :s")
+        values[":s"] = body["store"]
+        names["#store"] = "store"
+    if "receipt_date" in body:
+        parts.append("receipt_date = :d")
+        values[":d"] = body["receipt_date"]
+    if not parts:
+        raise HTTPException(400, "Nothing to update")
+    import boto3, os
+    ddb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    table_name = os.environ.get("DYNAMODB_RECEIPTS_TABLE", "CostcoReceipts")
+    ddb.Table(table_name).update_item(
+        Key={"receipt_id": receipt_id},
+        UpdateExpression="SET " + ", ".join(parts),
+        ExpressionAttributeValues=values,
+        **({"ExpressionAttributeNames": names} if names else {}),
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/receipt/{receipt_id}/item/{index}")
+def delete_item(receipt_id: str, index: int):
+    rc = db.get_receipt(receipt_id)
+    if not rc or index < 0 or index >= len(rc.get("items", [])):
+        raise HTTPException(404, "Item not found")
+    items = rc["items"]
+    items.pop(index)
+    db.update_receipt_items(receipt_id, items)
     return {"ok": True}
 
 

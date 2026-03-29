@@ -46,7 +46,7 @@ input[type=file]{display:none}
 .tab:hover{background:#fce8f0;border-color:var(--pink)}
 .tab.active{background:var(--pink);color:#fff;border-color:var(--pink)}
 .tab .cnt{opacity:.7;margin-left:3px}
-.deals-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:8px;margin-top:10px;max-height:560px;overflow-y:auto}
+.deals-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr));gap:8px;margin-top:10px;max-height:560px;overflow-y:auto}
 .deal{padding:12px 14px;background:var(--bg);border-radius:12px;border:2px solid transparent;transition:all .15s}
 .deal:hover{border-color:var(--teal);background:#f0faf8}
 .deal-del{position:absolute;top:6px;right:6px;background:none;border:none;cursor:pointer;font-size:.7em;color:var(--muted);opacity:0;transition:opacity .15s;padding:2px 5px;border-radius:4px}
@@ -133,28 +133,44 @@ tr.item-row.selected{background:#d4f5f0;border-left:3px solid var(--teal)}
 @media(max-width:768px){
   .grid-2{grid-template-columns:1fr}
   .deals-grid{grid-template-columns:1fr}
-  .nav h1{font-size:1.2em}
+  .nav{padding:10px 14px}
+  .nav h1{font-size:1.1em}
+  .nav-inner{flex-wrap:wrap;gap:8px}
+  .container{padding:12px 10px 30px}
+  .card{padding:14px}
+  .card-header{flex-direction:column;align-items:flex-start;gap:10px}
+  .card-header .btn-row{width:100%}
+  .btn{padding:8px 14px;font-size:.8em}
+  .upload-flex{flex-direction:column}
+  .upload-flex .upload-zone{min-width:0;width:100%}
+  .analyze-row{flex-direction:column;align-items:stretch}
+  .analyze-row .multi-select{width:100%}
+  .analyze-row .multi-select-btn{width:100%}
+  .filter-row{flex-direction:column;align-items:flex-start;gap:6px}
 }
 </style>
 </head>
 <body>
 <div class="nav"><div class="nav-inner">
-  <h1>🛒 Costco Scanner <span class="nav-badge">AI</span> <button id="logout-btn" onclick="signOut()" style="display:none;float:right;font-size:14px;padding:6px 14px;background:rgba(255,255,255,.2);border:2px solid #fff;border-radius:999px;cursor:pointer;color:#fff;font-weight:700">Sign Out</button></h1>
-  <div class="btn-row">
+  <h1>🛒 Costco Scanner <span class="nav-badge">AI</span></h1>
+  <div class="btn-row" style="align-items:center;gap:8px">
     <span id="totalDeals" class="badge badge-blue" style="display:none"></span>
     <span id="totalReceipts" class="badge badge-red" style="display:none"></span>
+    <button id="logout-btn" onclick="signOut()" style="display:none;font-size:13px;padding:5px 12px;background:rgba(255,255,255,.2);border:2px solid #fff;border-radius:999px;cursor:pointer;color:#fff;font-weight:700">Sign Out</button>
   </div>
 </div></div>
 
 <div class="container">
 
 <div class="card" style="padding:14px 20px">
-  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-    <h2 style="font-size:1em;margin:0;white-space:nowrap">📄 Upload Receipts</h2>
+  <h2 style="font-size:1em;margin:0 0 10px;white-space:nowrap">📄 Upload Receipts</h2>
+  <div class="upload-flex" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
     <div class="upload-zone" onclick="document.getElementById('pdfFile').click()" style="padding:8px 16px;border-width:1px;display:flex;align-items:center;gap:8px;flex:1;min-width:200px">
-      <input type="file" id="pdfFile" accept=".pdf" multiple>
-      <span id="uploadLabel" style="font-size:.85em">📄 Choose PDFs or drag & drop</span>
+      <input type="file" id="pdfFile" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple>
+      <span id="uploadLabel" style="font-size:.85em">📄 Choose files or drag & drop</span>
     </div>
+    <button class="btn btn-primary" onclick="document.getElementById('cameraFile').click()">📷 Camera</button>
+    <input type="file" id="cameraFile" accept="image/*" capture="environment" style="display:none" onchange="handleCameraCapture(this)">
     <button class="btn btn-primary" onclick="uploadReceipts()">📤 Upload & Parse</button>
   </div>
   <div id="uploadFileList" class="upload-file-list"></div>
@@ -162,7 +178,7 @@ tr.item-row.selected{background:#d4f5f0;border-left:3px solid var(--teal)}
 
 <div class="card">
   <div class="card-header"><h2>🤖 AI Price Match</h2></div>
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+  <div class="analyze-row" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
     <div class="multi-select" id="receiptMultiSelect">
       <button class="multi-select-btn" onclick="toggleMultiSelect()" type="button">
         <span id="msLabel">All receipts</span><span class="arrow">▼</span>
@@ -171,7 +187,7 @@ tr.item-row.selected{background:#d4f5f0;border-left:3px solid var(--teal)}
     </div>
     <button class="btn btn-primary" onclick="runAnalysis()">🧠 Analyze</button>
   </div>
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:.82em">
+  <div class="filter-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:.82em">
     <label style="color:var(--gray)">Deals from:</label>
     <input type="date" id="analysisDateFrom" class="date-input">
     <label style="color:var(--gray)">to:</label>
@@ -193,7 +209,7 @@ tr.item-row.selected{background:#d4f5f0;border-left:3px solid var(--teal)}
     </div>
   </div>
   <input type="text" class="search-input" id="dealSearch" placeholder="Search by name, item #, or source..." oninput="filterDeals()">
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;font-size:.82em">
+  <div class="filter-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;font-size:.82em">
     <label style="color:var(--gray)">Date range:</label>
     <input type="date" id="dealDateFrom" class="date-input" onchange="filterDeals()">
     <label style="color:var(--gray)">to:</label>
@@ -527,10 +543,23 @@ function showFileList() {
   ).join('');
 }
 
+function handleCameraCapture(input) {
+  if (input.files.length) {
+    // Transfer camera file to the main file list display, then auto-upload
+    const dt = new DataTransfer();
+    for (const f of $('pdfFile').files) dt.items.add(f);
+    dt.items.add(input.files[0]);
+    $('pdfFile').files = dt.files;
+    $('pdfFile').dispatchEvent(new Event('change'));
+    input.value = '';
+    uploadReceipts();
+  }
+}
+
 // Upload multiple files sequentially
 async function uploadReceipts() {
   const files = $('pdfFile').files;
-  if (!files.length) return alert('Select PDF files first');
+  if (!files.length) return alert('Select a file or take a photo first');
   let ok = 0;
   for (let i = 0; i < files.length; i++) {
     const el = document.getElementById('uf'+i);
@@ -588,7 +617,7 @@ async function loadReceipts() {
       const store = shortStore(rc.store || 'Unknown');
       html += `<div class="receipt-card" data-rid="${rc.receipt_id}" onclick="toggleReceipt(this)">
         <div class="receipt-header">
-          <span class="receipt-title">📋 ${rc.receipt_date || '?'} — ${store}${isEligible(rc.receipt_date) ? '' : ' <span style="background:#fce8eb;color:#c5221f;padding:1px 8px;border-radius:4px;font-size:.68em;font-weight:600;margin-left:6px">Past 30 days</span>'}</span>
+          <span class="receipt-title">📋 ${rc.receipt_date || '?'} — ${store}${isEligible(rc.receipt_date) ? '' : ' <span style="background:#fce8eb;color:#c5221f;padding:1px 8px;border-radius:4px;font-size:.68em;font-weight:600;margin-left:6px">Past 30 days</span>'} <button class="edit-btn" onclick="event.stopPropagation();editReceipt('${rc.receipt_id}','${(rc.receipt_date||'').replace(/'/g,"\\'")}','${(rc.store||'').replace(/'/g,"\\'")}')" title="Edit date/store">✏️</button></span>
           <div class="receipt-stats">
             <button class="btn icon-btn" onclick="event.stopPropagation();reparseReceipt('${rc.receipt_id}',this)" title="Reparse with Premier AI">🔄</button>
             <button class="btn icon-btn" onclick="event.stopPropagation();openPdf('${rc.receipt_id}')" title="View PDF">📎</button>
@@ -631,7 +660,9 @@ function editItem(tr) {
     <label>Item #</label><input id="ed_num" value="${item.item_number||''}">
     <label>Price</label><input id="ed_price" value="${item.price||''}">
     <label>Qty</label><input id="ed_qty" value="${item.qty||'1'}">
-    <div class="btn-row">
+    <div style="display:flex;gap:6px;margin-top:14px;align-items:center">
+      <button class="btn btn-danger" onclick="deleteItem('${rid}',${idx},this)">🗑️ Delete</button>
+      <span style="flex:1"></span>
       <button class="btn btn-ghost" onclick="this.closest('.edit-overlay').remove()">Cancel</button>
       <button class="btn btn-primary" onclick="saveItem('${rid}',${idx},this)">💾 Save</button>
     </div>
@@ -648,6 +679,49 @@ async function saveItem(rid, idx, btn) {
   try {
     const r = await apiFetch(`/api/receipt/${rid}/item/${idx}`, {
       method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item)
+    });
+    if (!r.ok) throw new Error((await r.json()).detail);
+    document.querySelector('.edit-overlay').remove();
+    loadReceipts();
+  } catch(e) { alert('Save failed: '+e.message); btn.disabled=false; btn.textContent='💾 Save'; }
+}
+
+async function deleteItem(rid, idx, btn) {
+  if (!confirm('Delete this item from the receipt?')) return;
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    const r = await apiFetch(`/api/receipt/${rid}/item/${idx}`, {method:'DELETE'});
+    if (!r.ok) throw new Error((await r.json()).detail);
+    const ov = document.querySelector('.edit-overlay');
+    if (ov) ov.remove();
+    loadReceipts();
+  } catch(e) { alert('Delete failed: '+e.message); btn.disabled=false; btn.textContent='🗑️ Delete'; }
+}
+
+function editReceipt(rid, date, store) {
+  const ov = document.createElement('div');
+  ov.className = 'edit-overlay';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="edit-form">
+    <h3>✏️ Edit Receipt</h3>
+    <label>Date</label><input id="ed_rdate" type="date" value="${date}">
+    <label>Store</label><input id="ed_rstore" value="${store.replace(/"/g,'&quot;')}">
+    <div style="display:flex;gap:6px;margin-top:14px;align-items:center">
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost" onclick="this.closest('.edit-overlay').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveReceipt('${rid}',this)">💾 Save</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('#ed_rdate').focus();
+}
+
+async function saveReceipt(rid, btn) {
+  btn.disabled = true; btn.textContent = '⏳';
+  const body = { receipt_date: document.getElementById('ed_rdate').value, store: document.getElementById('ed_rstore').value };
+  try {
+    const r = await apiFetch(`/api/receipt/${rid}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
     });
     if (!r.ok) throw new Error((await r.json()).detail);
     document.querySelector('.edit-overlay').remove();
