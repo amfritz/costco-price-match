@@ -6,7 +6,7 @@ from services import db, receipt_parser, price_scanner, analyzer
 import hashlib
 
 app = FastAPI(title="Costco Receipt Scanner")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], expose_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["https://costco.dunkinspeeps.com", "http://localhost:8000"], allow_methods=["*"], allow_headers=["*"], expose_headers=["*"])
 db.ensure_tables()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

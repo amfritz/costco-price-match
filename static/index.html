@@ -2,78 +2,82 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Costco Receipt Scanner</title>
+<title>Costco Scanner - Dunkin's Peeps</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,700;0,900;1,700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
-:root{--blue:#005daa;--red:#e31837;--green:#28a745;--gray:#6c757d;--bg:#f0f2f5;--card:#fff;--border:#e8eaed;--text:#1a1a2e;--muted:#888}
+:root{--blue:#3BBFAE;--red:#E0337A;--green:#3BBFAE;--gray:#6c757d;--bg:#F5EDE0;--card:#fff;--border:#e0d5c7;--text:#1a1a2e;--muted:#888;--pink:#E0337A;--teal:#3BBFAE;--shadow:4px 4px 0 #1a1a2e}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);min-height:100vh;color:var(--text)}
-.nav{background:var(--card);padding:14px 24px;box-shadow:0 1px 3px rgba(0,0,0,.08);position:sticky;top:0;z-index:10}
+body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);min-height:100vh;color:var(--text)}
+.nav{background:var(--pink);padding:14px 24px;box-shadow:var(--shadow);position:sticky;top:0;z-index:10}
 .nav-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between}
-.nav h1{font-size:1.4em;color:var(--red);display:flex;align-items:center;gap:8px}
-.nav-badge{font-size:.65em;background:var(--blue);color:#fff;padding:2px 10px;border-radius:12px;font-weight:500}
+.nav h1{font-family:'Fraunces',serif;font-size:1.4em;color:#fff;display:flex;align-items:center;gap:8px}
+.nav-badge{font-size:.65em;background:var(--teal);color:#fff;padding:2px 10px;border-radius:12px;font-weight:700}
 .container{max-width:1200px;margin:0 auto;padding:16px 20px 40px}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.card{background:var(--card);border-radius:10px;padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.06);border:1px solid var(--border)}
+.card{background:var(--card);border-radius:16px;padding:20px;margin-bottom:16px;box-shadow:var(--shadow);border:2px solid var(--text)}
 .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
-.card-header h2{font-size:1.1em;color:var(--text);display:flex;align-items:center;gap:8px}
-.badge{font-size:.75em;padding:2px 10px;border-radius:12px;font-weight:500}
-.badge-blue{background:#e8f0fe;color:var(--blue)}
-.badge-red{background:#fce8eb;color:var(--red)}
-.badge-green{background:#e6f4ea;color:var(--green)}
+.card-header h2{font-family:'Fraunces',serif;font-size:1.1em;color:var(--text);display:flex;align-items:center;gap:8px}
+.badge{font-size:.75em;padding:2px 10px;border-radius:12px;font-weight:700}
+.badge-blue{background:#d4f5f0;color:#2a8f82}
+.badge-red{background:#fce8f0;color:var(--pink)}
+.badge-green{background:#d4f5f0;color:#2a8f82}
 .btn-row{display:flex;gap:6px;flex-wrap:wrap}
-.btn{border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:.82em;font-weight:500;transition:all .15s;display:inline-flex;align-items:center;gap:4px}
-.btn-primary{background:var(--blue);color:#fff}
-.btn-primary:hover{background:#004a8f}
-.btn-danger{background:var(--red);color:#fff}
-.btn-danger:hover{background:#a01128;transform:scale(1.05)}
-.btn-ghost{background:transparent;color:var(--gray);border:1px solid var(--border)}
-.btn-ghost:hover{background:#f8f9fa}
+.btn{border:none;padding:10px 20px;border-radius:999px;cursor:pointer;font-size:.85em;font-weight:700;transition:all .15s;display:inline-flex;align-items:center;gap:5px;box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.btn:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,.2)}
+.btn:active{transform:translateY(0);box-shadow:0 2px 6px rgba(0,0,0,.15)}
+.btn-primary{background:#1a7a6d;color:#fff}
+.btn-primary:hover{background:#146b5f}
+.btn-danger{background:#b0245f;color:#fff}
+.btn-danger:hover{background:#961e51}
+.btn-ghost{background:var(--card);color:var(--text);box-shadow:0 2px 6px rgba(0,0,0,.08);border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--bg);box-shadow:0 4px 12px rgba(0,0,0,.12)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .icon-btn{font-size:.75em;padding:4px 10px;text-decoration:none;border-radius:6px;transition:background .15s}
 .icon-btn:hover{background:#dbeafe}
 .icon-btn-del:hover{background:#fce8eb!important}
 input[type=file]{display:none}
-.upload-zone{border:2px dashed var(--border);border-radius:8px;padding:20px;text-align:center;cursor:pointer;transition:all .2s}
-.upload-zone:hover{border-color:var(--blue);background:#f8f9ff}
+.upload-zone{border:2px dashed var(--border);border-radius:12px;padding:20px;text-align:center;cursor:pointer;transition:all .2s}
+.upload-zone:hover{border-color:var(--pink);background:#fce8f0}
 .search-input{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:.88em;background:var(--bg)}
-.search-input:focus{outline:none;border-color:var(--blue);background:#fff}
+.search-input:focus{outline:none;border-color:var(--teal);background:#fff}
 .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0}
-.tab{padding:5px 12px;border-radius:16px;font-size:.78em;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--gray);transition:all .15s;user-select:none}
-.tab:hover{background:#f0f4ff;border-color:var(--blue)}
-.tab.active{background:var(--blue);color:#fff;border-color:var(--blue)}
+.tab{padding:5px 12px;border-radius:999px;font-size:.78em;font-weight:700;cursor:pointer;border:2px solid var(--border);background:var(--card);color:var(--gray);transition:all .15s;user-select:none}
+.tab:hover{background:#fce8f0;border-color:var(--pink)}
+.tab.active{background:var(--pink);color:#fff;border-color:var(--pink)}
 .tab .cnt{opacity:.7;margin-left:3px}
 .deals-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:8px;margin-top:10px;max-height:560px;overflow-y:auto}
-.deal{padding:12px 14px;background:var(--bg);border-radius:8px;border:1px solid transparent;transition:all .15s}
-.deal:hover{border-color:var(--blue);background:#f8f9ff}
+.deal{padding:12px 14px;background:var(--bg);border-radius:12px;border:2px solid transparent;transition:all .15s}
+.deal:hover{border-color:var(--teal);background:#f0faf8}
 .deal-del{position:absolute;top:6px;right:6px;background:none;border:none;cursor:pointer;font-size:.7em;color:var(--muted);opacity:0;transition:opacity .15s;padding:2px 5px;border-radius:4px}
 .deal:hover .deal-del{opacity:.6}
 .deal-del:hover{opacity:1!important;color:var(--red);background:#fce8eb}
 .deal-name{font-weight:500;font-size:.88em;margin-bottom:4px}
-.deal-name a{color:var(--blue);text-decoration:none}
+.deal-name a{color:var(--pink);text-decoration:none}
 .deal-name a:hover{text-decoration:underline}
 .deal-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.price{font-weight:700;color:var(--green);font-size:1em}
+.price{font-weight:700;color:var(--teal);font-size:1em}
 .item-num{font-size:.75em;color:var(--muted)}
 .source-tag{font-size:.68em;color:var(--gray);background:var(--card);padding:2px 8px;border-radius:10px;border:1px solid var(--border)}
 .expiry{font-size:.72em;color:#e67e22}
-.status{padding:10px 14px;border-radius:6px;margin:8px 0;font-size:.88em;font-weight:500}
-.status-ok{background:#e6f4ea;color:#137333}
-.status-err{background:#fce8eb;color:#c5221f}
-.status-load{background:#e8f0fe;color:#1967d2}
+.status{padding:10px 14px;border-radius:12px;margin:8px 0;font-size:.88em;font-weight:700}
+.status-ok{background:#d4f5f0;color:#2a8f82}
+.status-err{background:#fce8f0;color:var(--pink)}
+.status-load{background:#fef3e2;color:#b8860b}
 .source-report{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
-.source-chip{font-size:.75em;padding:4px 10px;border-radius:12px;font-weight:500;border:1px solid var(--border)}
-.source-chip.ok{background:#e6f4ea;color:#137333;border-color:#b7e1c8}
-.source-chip.empty{background:#fff3cd;color:#856404;border-color:#ffc107}
-.source-chip.error{background:#fce8eb;color:#c5221f;border-color:#f5c6cb}
-.source-chip.cached{background:#e8f0fe;color:#1967d2;border-color:#b3d4fc}
+.source-chip{font-size:.75em;padding:4px 10px;border-radius:999px;font-weight:700;border:2px solid var(--border)}
+.source-chip.ok{background:#d4f5f0;color:#2a8f82;border-color:#a8e6cf}
+.source-chip.empty{background:#fef3e2;color:#b8860b;border-color:#f0d68a}
+.source-chip.error{background:#fce8f0;color:var(--pink);border-color:#f5a3c7}
+.source-chip.cached{background:#e8f0fe;color:#5b7bb4;border-color:#b3d4fc}
 .source-chip .dur{opacity:.6;margin-left:3px}
 .empty{text-align:center;padding:24px;color:var(--muted);font-size:.9em}
 table{width:100%;border-collapse:collapse;font-size:.85em}
 th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border)}
 th{background:var(--bg);font-weight:600;color:var(--gray);font-size:.8em;text-transform:uppercase;letter-spacing:.3px}
 tr.item-row{cursor:pointer;transition:background .1s}
-tr.item-row:hover{background:#f0f4ff}
-tr.item-row.selected{background:#dbeafe;border-left:3px solid var(--blue)}
+tr.item-row:hover{background:#f0faf8}
+tr.item-row.selected{background:#d4f5f0;border-left:3px solid var(--teal)}
 .edit-btn{background:none;border:none;cursor:pointer;font-size:.8em;padding:2px 4px;opacity:.4;transition:opacity .15s}
 .edit-btn:hover,.item-row:hover .edit-btn{opacity:1}
 .edit-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:100;display:flex;align-items:center;justify-content:center}
@@ -83,14 +87,14 @@ tr.item-row.selected{background:#dbeafe;border-left:3px solid var(--blue)}
 .edit-form input{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:5px;font-size:.88em}
 .edit-form input:focus{outline:none;border-color:var(--blue)}
 .edit-form .btn-row{margin-top:14px;justify-content:flex-end}
-.receipt-card{padding:14px;background:var(--bg);border-radius:8px;margin:8px 0;border:1px solid transparent;cursor:pointer;transition:all .15s}
-.receipt-card:hover{border-color:var(--blue);background:#f8f9ff}
-.receipt-card.selected{border-color:var(--blue);background:#e8f0fe}
+.receipt-card{padding:14px;background:var(--bg);border-radius:12px;margin:8px 0;border:2px solid transparent;cursor:pointer;transition:all .15s}
+.receipt-card:hover{border-color:var(--teal);background:#f0faf8}
+.receipt-card.selected{border-color:var(--teal);background:#d4f5f0}
 .receipt-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .receipt-title{font-weight:600;font-size:.92em}
 .receipt-stats{display:flex;gap:12px}
 .receipt-stat{text-align:center}
-.receipt-stat-val{font-weight:700;color:var(--blue);font-size:1.1em}
+.receipt-stat-val{font-weight:700;color:var(--pink);font-size:1.1em}
 .receipt-stat-lbl{font-size:.7em;color:var(--muted);text-transform:uppercase}
 .receipt-items{display:none;margin-top:8px}
 .receipt-card.expanded .receipt-items{display:block}
@@ -102,14 +106,14 @@ tr.item-row.selected{background:#dbeafe;border-left:3px solid var(--blue)}
 .select-receipt{padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.85em;background:var(--card);width:100%;margin-bottom:10px}
 .multi-select{position:relative;width:100%;min-width:200px;flex:1}
 .multi-select-btn{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.85em;background:var(--card);cursor:pointer;display:flex;justify-content:space-between;align-items:center;text-align:left;color:var(--text)}
-.multi-select-btn:hover{border-color:var(--blue)}
+.multi-select-btn:hover{border-color:var(--teal)}
 .multi-select-btn .arrow{font-size:.6em;color:var(--muted);transition:transform .2s}
 .multi-select.open .arrow{transform:rotate(180deg)}
 .multi-select-dd{display:none;position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.1);z-index:20;max-height:260px;overflow-y:auto;margin-top:4px}
 .multi-select.open .multi-select-dd{display:block}
 .ms-opt{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;font-size:.84em;transition:background .1s}
 .ms-opt:hover{background:var(--bg)}
-.ms-opt input{accent-color:var(--blue)}
+.ms-opt input{accent-color:var(--pink)}
 .ms-opt.all{border-bottom:1px solid var(--border);font-weight:600}
 .upload-file-list{margin-top:10px}
 .upload-file{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px;font-size:.85em;border:1px solid var(--border)}
@@ -117,14 +121,14 @@ tr.item-row.selected{background:#dbeafe;border-left:3px solid var(--blue)}
 .upload-file .fsize{color:var(--muted);font-size:.8em;white-space:nowrap}
 .upload-file .fstatus{font-size:.8em;white-space:nowrap;min-width:70px;text-align:right}
 .upload-file .fprog{flex:0 0 80px;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
-.upload-file .fprog-bar{height:100%;background:var(--blue);border-radius:2px;transition:width .3s}
-.upload-file.done{border-color:#c6efce;background:#e6f4ea}
-.upload-file.err{border-color:#fcd5d5;background:#fce8eb}
+.upload-file .fprog-bar{height:100%;background:var(--teal);border-radius:2px;transition:width .3s}
+.upload-file.done{border-color:#a8e6cf;background:#d4f5f0}
+.upload-file.err{border-color:#f5a3c7;background:#fce8f0}
 .date-input{padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:.85em;background:var(--card)}
 .source-checks{display:flex;gap:6px;flex-wrap:wrap}
 .source-checks label{display:flex;align-items:center;gap:3px;font-size:.8em;color:var(--gray);cursor:pointer;padding:2px 8px;border:1px solid var(--border);border-radius:12px;transition:all .15s}
-.source-checks label:hover{border-color:var(--blue);background:#f0f4ff}
-.source-checks input:checked+span{color:var(--blue);font-weight:600}
+.source-checks label:hover{border-color:var(--pink);background:#fce8f0}
+.source-checks input:checked+span{color:var(--pink);font-weight:600}
 .source-checks input{display:none}
 @media(max-width:768px){
   .grid-2{grid-template-columns:1fr}
@@ -135,7 +139,7 @@ tr.item-row.selected{background:#dbeafe;border-left:3px solid var(--blue)}
 </head>
 <body>
 <div class="nav"><div class="nav-inner">
-  <h1>🛒 Costco Scanner <span class="nav-badge">AI-Powered</span> <button id="logout-btn" onclick="signOut()" style="display:none;float:right;font-size:14px;padding:6px 14px;background:var(--border);border:none;border-radius:6px;cursor:pointer;color:var(--text)">Sign Out</button></h1>
+  <h1>🛒 Costco Scanner <span class="nav-badge">AI</span> <button id="logout-btn" onclick="signOut()" style="display:none;float:right;font-size:14px;padding:6px 14px;background:rgba(255,255,255,.2);border:2px solid #fff;border-radius:999px;cursor:pointer;color:#fff;font-weight:700">Sign Out</button></h1>
   <div class="btn-row">
     <span id="totalDeals" class="badge badge-blue" style="display:none"></span>
     <span id="totalReceipts" class="badge badge-red" style="display:none"></span>
@@ -241,33 +245,77 @@ function initializeApp() {
   }
 }
 
-// Cognito auth (Amplify mode)
+// Cognito auth (Amplify mode) — passwordless email OTP
 let currentUser = null;
-let userPool = null;
+let authSession = null; // Cognito challenge session token
+
+const COGNITO_ENDPOINT = () => `https://cognito-idp.${CONFIG.REGION}.amazonaws.com/`;
+
+async function cognitoApi(action, body) {
+  const r = await fetch(COGNITO_ENDPOINT(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-amz-json-1.1', 'X-Amz-Target': `AWSCognitoIdentityProviderService.${action}` },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.message || data.__type || 'Auth request failed');
+  return data;
+}
+
+function parseJwt(token) {
+  const payload = token.split('.')[1];
+  return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+}
+
+function storeTokens(email, result) {
+  const auth = result.AuthenticationResult;
+  const tokens = { email, idToken: auth.IdToken, accessToken: auth.AccessToken, refreshToken: auth.RefreshToken };
+  localStorage.setItem('costco_auth', JSON.stringify(tokens));
+  return tokens;
+}
+
+async function refreshSession(stored) {
+  try {
+    const result = await cognitoApi('InitiateAuth', {
+      AuthFlow: 'REFRESH_TOKEN_AUTH',
+      ClientId: CONFIG.COGNITO_CLIENT_ID,
+      AuthParameters: { REFRESH_TOKEN: stored.refreshToken },
+    });
+    const auth = result.AuthenticationResult;
+    stored.idToken = auth.IdToken;
+    stored.accessToken = auth.AccessToken;
+    if (auth.RefreshToken) stored.refreshToken = auth.RefreshToken;
+    localStorage.setItem('costco_auth', JSON.stringify(stored));
+    return stored;
+  } catch(e) {
+    localStorage.removeItem('costco_auth');
+    return null;
+  }
+}
 
 function initializeCognito() {
-  // Load AWS Cognito SDK
-  const sdk = document.createElement('script');
-  sdk.src = 'https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6/dist/amazon-cognito-identity.min.js';
-  sdk.onload = () => {
-    userPool = new AmazonCognitoIdentity.CognitoUserPool({
-      UserPoolId: CONFIG.COGNITO_USER_POOL_ID,
-      ClientId: CONFIG.COGNITO_CLIENT_ID,
-    });
-    // Check for existing session
-    const cognitoUser = userPool.getCurrentUser();
-    if (cognitoUser) {
-      cognitoUser.getSession((err, session) => {
-        if (session && session.isValid()) {
-          currentUser = { email: cognitoUser.getUsername(), token: session.getIdToken().getJwtToken() };
+  const stored = JSON.parse(localStorage.getItem('costco_auth') || 'null');
+  if (stored && stored.idToken) {
+    const claims = parseJwt(stored.idToken);
+    const now = Math.floor(Date.now() / 1000);
+    if (claims.exp > now + 60) {
+      // Token still valid
+      currentUser = { email: stored.email, token: stored.idToken };
+      document.getElementById('logout-btn').style.display = '';
+      loadReceipts();
+      loadDeals();
+    } else {
+      // Try refresh
+      refreshSession(stored).then(refreshed => {
+        if (refreshed) {
+          currentUser = { email: refreshed.email, token: refreshed.idToken };
           document.getElementById('logout-btn').style.display = '';
           loadReceipts();
           loadDeals();
         } else { showLoginUI(); }
       });
-    } else { showLoginUI(); }
-  };
-  document.head.appendChild(sdk);
+    }
+  } else { showLoginUI(); }
 }
 
 function showLoginUI() {
@@ -276,15 +324,14 @@ function showLoginUI() {
   d.id = 'auth-screen';
   d.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg)">
-      <div style="background:var(--card);padding:40px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.1);max-width:400px;width:90%">
-        <h1 style="color:var(--red);text-align:center;margin-bottom:8px">🛒 Costco Scanner</h1>
-        <p style="color:var(--muted);text-align:center;margin-bottom:24px" id="auth-subtitle">Sign in to continue</p>
-        <div id="auth-error" style="display:none;background:#fee;color:#c00;padding:10px;border-radius:8px;margin-bottom:16px;font-size:14px"></div>
+      <div style="background:var(--card);padding:40px;border-radius:20px;box-shadow:6px 6px 0 #1a1a2e;border:2px solid #1a1a2e;max-width:400px;width:90%">
+        <h1 style="font-family:Fraunces,serif;color:var(--pink);text-align:center;margin-bottom:8px">🛒 Costco Scanner</h1>
+        <p style="color:var(--muted);text-align:center;margin-bottom:24px" id="auth-subtitle">Enter your email to sign in</p>
+        <div id="auth-error" style="display:none;background:#fce8f0;color:var(--pink);padding:10px;border-radius:12px;margin-bottom:16px;font-size:14px;font-weight:700"></div>
         <div id="auth-form">
-          <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;font-size:15px">
-          <input id="auth-pass" type="password" placeholder="Password" style="width:100%;padding:12px;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;font-size:15px">
-          <button onclick="doSignIn()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px">Sign In</button>
-          <p style="text-align:center;color:var(--muted);font-size:14px">No account? <a href="#" onclick="showSignUp();return false" style="color:var(--red)">Sign Up</a></p>
+          <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:15px;font-family:DM Sans,sans-serif">
+          <button onclick="doRequestOtp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Send Code</button>
+          <p style="text-align:center;color:var(--muted);font-size:14px">No account? <a href="#" onclick="showSignUp();return false" style="color:var(--pink);font-weight:700">Sign Up</a></p>
         </div>
       </div>
     </div>`;
@@ -295,28 +342,37 @@ function showSignUp() {
   document.getElementById('auth-subtitle').textContent = 'Create your account';
   document.getElementById('auth-error').style.display = 'none';
   document.getElementById('auth-form').innerHTML = `
-    <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;font-size:15px">
-    <input id="auth-pass" type="password" placeholder="Password (8+ chars, upper, lower, digit)" style="width:100%;padding:12px;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;font-size:15px">
-    <button onclick="doSignUp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px">Sign Up</button>
-    <p style="text-align:center;color:var(--muted);font-size:14px">Have an account? <a href="#" onclick="showSignIn();return false" style="color:var(--red)">Sign In</a></p>`;
+    <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:15px;font-family:DM Sans,sans-serif">
+    <button onclick="doSignUp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Sign Up</button>
+    <p style="text-align:center;color:var(--muted);font-size:14px">Have an account? <a href="#" onclick="showSignIn();return false" style="color:var(--pink);font-weight:700">Sign In</a></p>`;
 }
 
 function showSignIn() {
-  document.getElementById('auth-subtitle').textContent = 'Sign in to continue';
+  document.getElementById('auth-subtitle').textContent = 'Enter your email to sign in';
   document.getElementById('auth-error').style.display = 'none';
   document.getElementById('auth-form').innerHTML = `
-    <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;font-size:15px">
-    <input id="auth-pass" type="password" placeholder="Password" style="width:100%;padding:12px;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;font-size:15px">
-    <button onclick="doSignIn()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px">Sign In</button>
-    <p style="text-align:center;color:var(--muted);font-size:14px">No account? <a href="#" onclick="showSignUp();return false" style="color:var(--red)">Sign Up</a></p>`;
+    <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:15px;font-family:DM Sans,sans-serif">
+    <button onclick="doRequestOtp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Send Code</button>
+    <p style="text-align:center;color:var(--muted);font-size:14px">No account? <a href="#" onclick="showSignUp();return false" style="color:var(--pink);font-weight:700">Sign Up</a></p>`;
+}
+
+function showOtpInput(email) {
+  document.getElementById('auth-subtitle').textContent = `Code sent to ${email}`;
+  document.getElementById('auth-error').style.display = 'none';
+  document.getElementById('auth-form').innerHTML = `
+    <input id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Enter code" maxlength="8" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:20px;font-family:DM Sans,sans-serif;text-align:center;letter-spacing:6px">
+    <button onclick="doVerifyOtp('${email}')" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Verify</button>
+    <p style="text-align:center;color:var(--muted);font-size:14px"><a href="#" onclick="doRequestOtp('${email}');return false" style="color:var(--pink);font-weight:700">Resend code</a> · <a href="#" onclick="showSignIn();return false" style="color:var(--muted)">Back</a></p>`;
+  document.getElementById('auth-code').focus();
 }
 
 function showConfirm(email) {
   document.getElementById('auth-subtitle').textContent = 'Check your email for a verification code';
   document.getElementById('auth-error').style.display = 'none';
   document.getElementById('auth-form').innerHTML = `
-    <input id="auth-code" type="text" placeholder="Verification code" style="width:100%;padding:12px;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;font-size:15px">
-    <button onclick="doConfirm('${email}')" class="btn btn-primary" style="width:100%;padding:12px">Confirm</button>`;
+    <input id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Verification code" maxlength="8" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:20px;font-family:DM Sans,sans-serif;text-align:center;letter-spacing:6px">
+    <button onclick="doConfirm('${email}')" class="btn btn-primary" style="width:100%;padding:12px;font-size:15px">Confirm & Sign In</button>`;
+  document.getElementById('auth-code').focus();
 }
 
 function authError(msg) {
@@ -325,51 +381,74 @@ function authError(msg) {
   el.style.display = 'block';
 }
 
-function doSignUp() {
+async function doSignUp() {
   const email = document.getElementById('auth-email').value;
-  const pass = document.getElementById('auth-pass').value;
-  if (!email || !pass) return authError('Email and password required');
-  const attrs = [new AmazonCognitoIdentity.CognitoUserAttribute({ Name: 'email', Value: email })];
-  userPool.signUp(email, pass, attrs, null, (err, result) => {
-    if (err) return authError(err.message);
+  if (!email) return authError('Email is required');
+  // Generate a random password (user never sees this — sign-in is OTP only)
+  const rnd = crypto.getRandomValues(new Uint8Array(20));
+  const randomPass = 'P!' + Array.from(rnd, b => b.toString(36)).join('').slice(0, 18) + 'aA1';
+  try {
+    await cognitoApi('SignUp', {
+      ClientId: CONFIG.COGNITO_CLIENT_ID,
+      Username: email,
+      Password: randomPass,
+      UserAttributes: [{ Name: 'email', Value: email }],
+    });
     showConfirm(email);
-  });
+  } catch(e) { authError(e.message); }
 }
 
-function doConfirm(email) {
+async function doConfirm(email) {
   const code = document.getElementById('auth-code').value;
-  const user = new AmazonCognitoIdentity.CognitoUser({ Username: email, Pool: userPool });
-  user.confirmRegistration(code, true, (err) => {
-    if (err) return authError(err.message);
-    document.getElementById('auth-subtitle').textContent = 'Account confirmed! Sign in now';
-    showSignIn();
-  });
+  if (!code) return authError('Enter the verification code');
+  try {
+    await cognitoApi('ConfirmSignUp', {
+      ClientId: CONFIG.COGNITO_CLIENT_ID,
+      Username: email,
+      ConfirmationCode: code,
+    });
+    // Account confirmed — now sign in via OTP
+    document.getElementById('auth-subtitle').textContent = 'Account confirmed! Sending sign-in code...';
+    doRequestOtp(email);
+  } catch(e) { authError(e.message); }
 }
 
-function doSignIn() {
-  const email = document.getElementById('auth-email').value;
-  const pass = document.getElementById('auth-pass').value;
-  if (!email || !pass) return authError('Email and password required');
-  const authDetails = new AmazonCognitoIdentity.AuthenticationDetails({ Username: email, Password: pass });
-  const user = new AmazonCognitoIdentity.CognitoUser({ Username: email, Pool: userPool });
-  user.authenticateUser(authDetails, {
-    onSuccess: (session) => {
-      currentUser = { email, token: session.getIdToken().getJwtToken() };
-      document.getElementById('auth-screen').remove();
-      document.querySelector('.container').style.display = '';
-      document.getElementById('logout-btn').style.display = '';
-      loadReceipts();
-      loadDeals();
-    },
-    onFailure: (err) => authError(err.message),
-  });
+async function doRequestOtp(emailOverride) {
+  const email = emailOverride || document.getElementById('auth-email').value;
+  if (!email) return authError('Email is required');
+  try {
+    const result = await cognitoApi('InitiateAuth', {
+      AuthFlow: 'USER_AUTH',
+      ClientId: CONFIG.COGNITO_CLIENT_ID,
+      AuthParameters: { USERNAME: email, PREFERRED_CHALLENGE: 'EMAIL_OTP' },
+    });
+    authSession = result.Session;
+    showOtpInput(email);
+  } catch(e) { authError(e.message); }
+}
+
+async function doVerifyOtp(email) {
+  const code = document.getElementById('auth-code').value;
+  if (!code) return authError('Enter the code from your email');
+  try {
+    const result = await cognitoApi('RespondToAuthChallenge', {
+      ChallengeName: 'EMAIL_OTP',
+      ClientId: CONFIG.COGNITO_CLIENT_ID,
+      ChallengeResponses: { USERNAME: email, EMAIL_OTP_CODE: code },
+      Session: authSession,
+    });
+    const tokens = storeTokens(email, result);
+    currentUser = { email, token: tokens.idToken };
+    document.getElementById('auth-screen').remove();
+    document.querySelector('.container').style.display = '';
+    document.getElementById('logout-btn').style.display = '';
+    loadReceipts();
+    loadDeals();
+  } catch(e) { authError(e.message); }
 }
 
 function signOut() {
-  if (userPool) {
-    const user = userPool.getCurrentUser();
-    if (user) user.signOut();
-  }
+  localStorage.removeItem('costco_auth');
   currentUser = null;
   location.reload();
 }
@@ -876,9 +955,7 @@ function renderMarkdown(md) {
     .replace(/(<br>\s*){2,}/g, '<br>');
 }
 
-// Init
-loadReceipts();
-loadDeals();
+// Init is handled by initializeApp() after config.js loads (or fails to load)
 </script>
 </body>
 </html>
