@@ -88,16 +88,17 @@ export class AmplifyStack extends cdk.Stack {
       'ALLOW_REFRESH_TOKEN_AUTH',
     ]);
 
-    // Default user credentials in Secrets Manager
-    const defaultPassword = 'CostScanner2026!';
+    // App credentials in Secrets Manager (auto-generated password)
     const defaultEmail = props.notifyEmail || 'admin@costscanner.local';
 
     const appSecret = new secretsmanager.Secret(this, 'AppCredentials', {
       secretName: 'costco-scanner/app-credentials',
-      secretStringValue: cdk.SecretValue.unsafePlainText(JSON.stringify({
-        username: defaultEmail,
-        password: defaultPassword,
-      })),
+      generateSecretString: {
+        secretStringTemplate: JSON.stringify({ username: defaultEmail }),
+        generateStringKey: 'password',
+        passwordLength: 24,
+        excludePunctuation: false,
+      },
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
@@ -109,7 +110,7 @@ export class AmplifyStack extends cdk.Stack {
         parameters: {
           UserPoolId: this.userPool.userPoolId,
           Username: defaultEmail,
-          TemporaryPassword: defaultPassword,
+          TemporaryPassword: appSecret.secretValueFromJson('password').unsafeUnwrap(),
           UserAttributes: [{ Name: 'email', Value: defaultEmail }, { Name: 'email_verified', Value: 'true' }],
           MessageAction: 'SUPPRESS',
         },
@@ -132,7 +133,7 @@ export class AmplifyStack extends cdk.Stack {
         parameters: {
           UserPoolId: this.userPool.userPoolId,
           Username: defaultEmail,
-          Password: defaultPassword,
+          Password: appSecret.secretValueFromJson('password').unsafeUnwrap(),
           Permanent: true,
         },
         physicalResourceId: cr.PhysicalResourceId.of('default-user-password'),

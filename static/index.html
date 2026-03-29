@@ -980,6 +980,9 @@ async function runAnalysis() {
   }
 }
 
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function safeUrl(url) { try { const u = new URL(url, location.href); return ['http:','https:'].includes(u.protocol) ? url : '#'; } catch { return '#'; } }
+
 function renderMarkdown(md) {
   const lines = md.split('\n');
   const out = [];
@@ -1010,10 +1013,11 @@ function renderMarkdown(md) {
           let v = c.trim();
           if (/^\[.+\]\(.+\)$/.test(v)) {
             const m = v.match(/^\[(.+)\]\((.+)\)$/);
-            v = `<a href="${m[2]}" target="_blank" style="color:var(--blue)">${m[1]}</a>`;
+            v = `<a href="${safeUrl(m[2])}" target="_blank" style="color:var(--blue)">${escHtml(m[1])}</a>`;
           } else if (/^[0-9a-f]{8}-[0-9a-f]{4}/.test(v)) {
-            v = `<button onclick="openPdf('${v}')" style="background:none;border:none;color:var(--blue);cursor:pointer" title="View receipt">📎</button>`;
-          } else if (/^\$[\d.]+$/.test(v)) v = `<span style="font-weight:600">${v}</span>`;
+            v = `<button onclick="openPdf('${escHtml(v)}')" style="background:none;border:none;color:var(--blue);cursor:pointer" title="View receipt">📎</button>`;
+          } else if (/^\$[\d.]+$/.test(v)) v = `<span style="font-weight:600">${escHtml(v)}</span>`;
+          else v = escHtml(v);
           return `<td style="padding:6px 10px;border-bottom:1px solid var(--border)">${v}</td>`;
         }).join('') + '</tr>';
       }
@@ -1023,7 +1027,7 @@ function renderMarkdown(md) {
     .replace(/### (.+)/g, '<h3 style="margin:12px 0 6px;font-size:1em">$1</h3>')
     .replace(/## (.+)/g, '<h2 style="margin:14px 0 8px;font-size:1.1em">$1</h2>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--blue);text-decoration:none">$1</a>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => `<a href="${safeUrl(url)}" target="_blank" style="color:var(--blue);text-decoration:none">${escHtml(text)}</a>`)
     .replace(/> (.+)/g, '<blockquote style="border-left:3px solid var(--blue);padding:8px 12px;margin:8px 0;background:#f8f9ff;border-radius:0 6px 6px 0;font-size:.88em">$1</blockquote>')
     .replace(/\n/g, '<br>')
     .replace(/(<br>\s*){2,}/g, '<br>');

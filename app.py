@@ -52,13 +52,22 @@ async def upload_receipt(file: UploadFile = File(...)):
     file_bytes = await file.read()
     if len(file_bytes) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10MB)")
+    # Validate file magic bytes match claimed type
+    magic_map = {b'%PDF': '.pdf', b'\xff\xd8\xff': '.jpg', b'\x89PNG': '.png',
+                 b'RIFF': '.webp', b'GIF8': '.gif'}
+    detected = next((e for sig, e in magic_map.items() if file_bytes[:len(sig)] == sig), None)
+    if is_pdf and detected != '.pdf':
+        raise HTTPException(400, "File content is not a valid PDF")
+    if is_image and detected not in IMAGE_EXTENSIONS:
+        raise HTTPException(400, "File content does not match a supported image format")
     try:
         if is_image:
             parsed = receipt_parser.parse_receipt_image(file_bytes, IMAGE_EXTENSIONS[ext])
         else:
             parsed = receipt_parser.parse_receipt_pdf(file_bytes)
     except Exception as e:
-        raise HTTPException(500, f"Failed to parse receipt: {e}")
+        import logging; logging.getLogger(__name__).error(f"Receipt parse error: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to parse receipt. Please try a different file.")
     receipt = db.put_receipt(
         items=parsed.get("items", []),
         receipt_date=parsed.get("receipt_date", ""),
@@ -201,7 +210,8 @@ def reparse_receipt(receipt_id: str):
     try:
         parsed = receipt_parser.parse_receipt_pdf(pdf_bytes, model="premier")
     except Exception as e:
-        raise HTTPException(500, f"Premier reparse failed: {e}")
+        import logging; logging.getLogger(__name__).error(f"Premier reparse error: {e}", exc_info=True)
+        raise HTTPException(500, "Premier reparse failed. Please try again.")
     db.update_receipt_items(
         receipt_id,
         items=parsed.get("items", []),
