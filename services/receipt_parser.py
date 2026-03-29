@@ -3,7 +3,7 @@ import json
 import re
 import os
 
-_bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-west-2"))
+_bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 MODEL_LITE = "us.amazon.nova-2-lite-v1:0"
 MODEL_PREMIER = "us.amazon.nova-premier-v1:0"
 
@@ -67,8 +67,12 @@ def _parse_premier(pdf_bytes: bytes) -> dict:
     import fitz
 
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    # Try 300 DPI first, fall back to 150 if image is too large (>20MB)
     pix = doc[0].get_pixmap(dpi=300)
     img_bytes = pix.tobytes("png")
+    if len(img_bytes) > 20 * 1024 * 1024:
+        pix = doc[0].get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
     doc.close()
 
     img_content = [{"image": {"format": "png", "source": {"bytes": img_bytes}}}]

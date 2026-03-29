@@ -60,6 +60,13 @@ input[type=file]{display:none}
 .status-ok{background:#e6f4ea;color:#137333}
 .status-err{background:#fce8eb;color:#c5221f}
 .status-load{background:#e8f0fe;color:#1967d2}
+.source-report{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.source-chip{font-size:.75em;padding:4px 10px;border-radius:12px;font-weight:500;border:1px solid var(--border)}
+.source-chip.ok{background:#e6f4ea;color:#137333;border-color:#b7e1c8}
+.source-chip.empty{background:#fff3cd;color:#856404;border-color:#ffc107}
+.source-chip.error{background:#fce8eb;color:#c5221f;border-color:#f5c6cb}
+.source-chip.cached{background:#e8f0fe;color:#1967d2;border-color:#b3d4fc}
+.source-chip .dur{opacity:.6;margin-left:3px}
 .empty{text-align:center;padding:24px;color:var(--muted);font-size:.9em}
 table{width:100%;border-collapse:collapse;font-size:.85em}
 th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border)}
@@ -192,6 +199,7 @@ tr.item-row.selected{background:#dbeafe;border-left:3px solid var(--blue)}
   <div id="dealTabs" class="tabs"></div>
   <div id="showingCount" class="showing"></div>
   <div id="priceStatus"></div>
+  <div id="sourceReport" class="source-report"></div>
   <div id="dealsArea"></div>
 </div>
 
@@ -390,6 +398,14 @@ async function openPdf(receiptId) {
   }
 }
 
+function isEligible(receiptDate) {
+  if (!receiptDate) return false;
+  const d = new Date(receiptDate + 'T00:00:00');
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  return d >= cutoff;
+}
+
 function shortStore(s) {
   // "COSTCO WHOLESALE 50 Queen Elizabeth Blvd Etobicoke, ON M8Z 1M1" → "Etobicoke"
   // "Etobicoke #524" → "Etobicoke #524"  (already short)
@@ -471,11 +487,15 @@ async function loadReceipts() {
     // Populate multi-select dropdown (sorted by date)
     const sorted = [...receipts].sort((a,b) => (a.receipt_date||'').localeCompare(b.receipt_date||''));
     const dd = $('msDropdown');
-    dd.innerHTML = '<label class="ms-opt all"><input type="checkbox" id="msAll" onchange="msToggleAll(this.checked)" checked><span>All receipts</span></label>';
+    const eligibleCount = sorted.filter(rc => isEligible(rc.receipt_date)).length;
+    dd.innerHTML = `<label class="ms-opt all"><input type="checkbox" id="msAll" onchange="msToggleAll(this.checked)" checked><span>All eligible receipts (${eligibleCount} of ${sorted.length})</span></label>`;
     sorted.forEach(rc => {
       const items = rc.items || [];
       const total = items.reduce((s, i) => s + (parseFloat(i.price) || 0), 0);
-      dd.innerHTML += `<label class="ms-opt"><input type="checkbox" value="${rc.receipt_id}" onchange="msUpdate()" checked><span>${rc.receipt_date || '?'} — ${shortStore(rc.store || 'Unknown')} (${items.length} items, $${total.toFixed(2)})</span></label>`;
+      const eligible = isEligible(rc.receipt_date);
+      const expTag = eligible ? '' : ' <span style="color:var(--red);font-size:.7em;font-weight:600">EXPIRED</span>';
+      const dimStyle = eligible ? '' : ' style="opacity:.5"';
+      dd.innerHTML += `<label class="ms-opt"${dimStyle}><input type="checkbox" value="${rc.receipt_id}" onchange="msUpdate()" ${eligible ? 'checked' : ''}><span>${rc.receipt_date || '?'} — ${shortStore(rc.store || 'Unknown')} (${items.length} items, $${total.toFixed(2)})${expTag}</span></label>`;
     });
     msUpdate();
 
@@ -489,7 +509,7 @@ async function loadReceipts() {
       const store = shortStore(rc.store || 'Unknown');
       html += `<div class="receipt-card" data-rid="${rc.receipt_id}" onclick="toggleReceipt(this)">
         <div class="receipt-header">
-          <span class="receipt-title">📋 ${rc.receipt_date || '?'} — ${store}</span>
+          <span class="receipt-title">📋 ${rc.receipt_date || '?'} — ${store}${isEligible(rc.receipt_date) ? '' : ' <span style="background:#fce8eb;color:#c5221f;padding:1px 8px;border-radius:4px;font-size:.68em;font-weight:600;margin-left:6px">Past 30 days</span>'}</span>
           <div class="receipt-stats">
             <button class="btn icon-btn" onclick="event.stopPropagation();reparseReceipt('${rc.receipt_id}',this)" title="Reparse with Premier AI">🔄</button>
             <button class="btn icon-btn" onclick="event.stopPropagation();openPdf('${rc.receipt_id}')" title="View PDF">📎</button>
@@ -583,13 +603,27 @@ async function clearReceipts() {
 
 // Deals
 async function scanPrices(force = false) {
-  setStatus('priceStatus', '⏳ Scanning 6 sources (coupon book uses AI, ~30s)...', 'load');
+  setStatus('priceStatus', '⏳ Scanning 5 US sources...', 'load');
+  $('sourceReport').innerHTML = '';
   try {
     const r = await apiFetch(force ? '/api/scan-prices?force_refresh=true' : '/api/scan-prices', {method:'POST'});
     const d = await r.json();
     setStatus('priceStatus', `✅ Found ${d.price_drops} deals`, 'ok');
+    if (d.sources) renderSourceReport(d.sources);
     loadDeals();
   } catch(e) { setStatus('priceStatus', '❌ ' + e.message, 'err'); }
+}
+
+function renderSourceReport(sources) {
+  let html = '';
+  sources.forEach(s => {
+    const cls = s.status;
+    const icon = s.status === 'ok' ? '✓' : s.status === 'error' ? '✗' : s.status === 'cached' ? '⚡' : '⚠';
+    const dur = s.duration_s > 0 ? `<span class="dur">${s.duration_s}s</span>` : '';
+    const tip = s.error ? ` title="${s.error}"` : '';
+    html += `<span class="source-chip ${cls}"${tip}>${icon} ${s.name}: ${s.count}${dur}</span>`;
+  });
+  $('sourceReport').innerHTML = html;
 }
 
 async function loadDeals() {
@@ -625,7 +659,7 @@ function renderTabs() {
   allDeals.forEach(d => { counts[d.source] = (counts[d.source]||0) + 1; });
   let html = `<span class="tab ${activeTab==='all'?'active':''}" onclick="setTab('all')">All<span class="cnt">${allDeals.length}</span></span>`;
   Object.entries(counts).sort((a,b) => b[1]-a[1]).forEach(([src, cnt]) => {
-    const label = src.replace('reddit.com/r/','r/').replace('.com','').replace('.ca','');
+    const label = src.replace('reddit.com/r/','r/').replace('thekrazycouponlady.com','KCL').replace('.com','');
     html += `<span class="tab ${activeTab===src?'active':''}" onclick="setTab('${src}')">${label}<span class="cnt">${cnt}</span></span>`;
   });
   $('dealTabs').innerHTML = html;
@@ -634,7 +668,7 @@ function renderTabs() {
   const as = $('analysisSources');
   if (as) {
     as.innerHTML = Object.keys(counts).sort().map(src => {
-      const label = src.replace('reddit.com/r/','r/').replace('.com','').replace('.ca','');
+      const label = src.replace('reddit.com/r/','r/').replace('thekrazycouponlady.com','KCL').replace('.com','');
       return `<label><input type="checkbox" value="${src}" checked><span>${label}</span></label>`;
     }).join('');
   }
@@ -663,7 +697,7 @@ function renderDeals(deals) {
     const name = link ? `<a href="${link}" target="_blank">${d.item_name}</a>` : d.item_name;
     const exp = d.promo_end ? `<span class="expiry">⏰ ${d.promo_end}</span>` : '';
     const num = d.item_number ? `<span class="item-num">#${d.item_number}</span>` : '';
-    const src = d.source.replace('reddit.com/r/','r/').replace('.com','').replace('.ca','');
+    const src = d.source.replace('reddit.com/r/','r/').replace('thekrazycouponlady.com','KCL').replace('.com','');
     html += `<div class="deal" style="position:relative">
       <button class="deal-del" onclick="deleteDeal('${d.item_id}',this)" title="Remove deal">✕</button>
       <div class="deal-name">${name}</div>
@@ -685,8 +719,10 @@ function msToggleAll(checked) {
 function msUpdate() {
   const all = [...$('msDropdown').querySelectorAll('input:not(#msAll)')];
   const checked = all.filter(cb => cb.checked);
-  $('msAll').checked = checked.length === all.length;
-  if (checked.length === 0 || checked.length === all.length) $('msLabel').textContent = 'All receipts';
+  const eligible = all.filter(cb => !cb.closest('label').style.opacity);
+  $('msAll').checked = checked.length === eligible.length && eligible.length > 0;
+  if (checked.length === 0) $('msLabel').textContent = 'No receipts selected';
+  else if (checked.length === eligible.length && eligible.length === all.length) $('msLabel').textContent = 'All receipts';
   else $('msLabel').textContent = `${checked.length} of ${all.length} receipts`;
 }
 function getSelectedReceiptIds() {

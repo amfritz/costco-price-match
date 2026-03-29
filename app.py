@@ -20,7 +20,7 @@ def root():
 def get_config():
     """Unauthenticated endpoint returning pool config + credentials for iOS BYOI flow."""
     import os, json, boto3
-    region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-west-2"))
+    region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
     result = {
         "user_pool_id": os.environ.get("USER_POOL_ID", ""),
         "user_pool_client_id": os.environ.get("USER_POOL_CLIENT_ID", ""),
@@ -81,8 +81,8 @@ def delete_single_receipt(receipt_id: str):
 
 @app.post("/api/scan-prices")
 def scan_prices(force_refresh: bool = False):
-    drops = price_scanner.scan_price_drops(force_refresh)
-    return {"price_drops": len(drops), "items": drops}
+    drops, source_results = price_scanner.scan_price_drops(force_refresh)
+    return {"price_drops": len(drops), "items": drops, "sources": source_results}
 
 
 @app.get("/api/price-drops")

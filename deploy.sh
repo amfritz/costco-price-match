@@ -3,7 +3,7 @@
 # Deploy script for Costco Scanner - CDK-based deployment
 set -e
 
-REGION=${AWS_DEFAULT_REGION:-us-east-2}
+REGION=${AWS_DEFAULT_REGION:-us-east-1}
 NOTIFY_EMAIL=${NOTIFY_EMAIL:-}
 
 echo "🚀 Deploying Costco Scanner to $REGION...\"
