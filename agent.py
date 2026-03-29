@@ -17,7 +17,7 @@ app = BedrockAgentCoreApp()
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
 SENDER = os.environ.get("NOTIFY_EMAIL", "")
-RECIPIENT = os.environ.get("NOTIFY_EMAIL", "")
+RECIPIENTS = [e.strip() for e in os.environ.get("NOTIFY_EMAILS", os.environ.get("NOTIFY_EMAIL", "")).split(",") if e.strip()]
 
 s3 = boto3.client("s3", region_name=REGION)
 ses = boto3.client("ses", region_name=REGION)
@@ -94,7 +94,7 @@ async def invoke(payload: dict[str, Any] | None = None) -> dict[str, Any]:
 
         ses.send_email(
             Source=SENDER,
-            Destination={"ToAddresses": [RECIPIENT]},
+            Destination={"ToAddresses": RECIPIENTS},
             Message={
                 "Subject": {"Data": "Costco Weekly Price Match Report"},
                 "Body": {"Html": {"Data": html_body}},
