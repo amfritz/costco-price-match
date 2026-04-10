@@ -620,7 +620,7 @@ async function loadReceipts() {
           <span class="receipt-title">📋 ${rc.receipt_date || '?'} — ${store}${isEligible(rc.receipt_date) ? '' : ' <span style="background:#fce8eb;color:#c5221f;padding:1px 8px;border-radius:4px;font-size:.68em;font-weight:600;margin-left:6px">Past 30 days</span>'} <button class="edit-btn" onclick="event.stopPropagation();editReceipt('${rc.receipt_id}','${(rc.receipt_date||'').replace(/'/g,"\\'")}','${(rc.store||'').replace(/'/g,"\\'")}')" title="Edit date/store">✏️</button></span>
           <div class="receipt-stats">
             <button class="btn icon-btn" onclick="event.stopPropagation();reparseReceipt('${rc.receipt_id}',this)" title="Reparse with Premier AI">🔄</button>
-            <button class="btn icon-btn" onclick="event.stopPropagation();openPdf('${rc.receipt_id}')" title="View PDF">📎</button>
+            <button class="btn icon-btn" onclick="event.stopPropagation();openPdf('${rc.receipt_id}')" title="View receipt">📎</button>
             <button class="btn icon-btn icon-btn-del" style="color:var(--red)" onclick="event.stopPropagation();deleteReceipt('${rc.receipt_id}')" title="Delete this receipt">✕</button>
             <div class="receipt-stat"><div class="receipt-stat-val">${items.length}</div><div class="receipt-stat-lbl">Items</div></div>
             <div class="receipt-stat"><div class="receipt-stat-val">$${total.toFixed(2)}</div><div class="receipt-stat-lbl">Total</div></div>

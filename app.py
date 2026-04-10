@@ -146,10 +146,24 @@ def analyze_receipts(
 
 @app.get("/api/receipt/{receipt_id}/pdf")
 def get_receipt_pdf(receipt_id: str):
-    pdf_bytes = db.download_pdf(receipt_id)
-    if not pdf_bytes:
-        raise HTTPException(404, "PDF not found")
-    return Response(content=pdf_bytes, media_type="application/pdf")
+    file_bytes = db.download_pdf(receipt_id)
+    if not file_bytes:
+        raise HTTPException(404, "Receipt file not found")
+    # Receipt can be a PDF or an image (camera capture). Detect from magic bytes.
+    head = file_bytes[:12]
+    if head[:4] == b'%PDF':
+        media_type = "application/pdf"
+    elif head[:3] == b'\xff\xd8\xff':
+        media_type = "image/jpeg"
+    elif head[:4] == b'\x89PNG':
+        media_type = "image/png"
+    elif head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+        media_type = "image/webp"
+    elif head[:4] == b'GIF8':
+        media_type = "image/gif"
+    else:
+        media_type = "application/octet-stream"
+    return Response(content=file_bytes, media_type=media_type)
 
 
 @app.put("/api/receipt/{receipt_id}/item/{index}")
@@ -204,21 +218,40 @@ def delete_item(receipt_id: str, index: int):
 
 @app.post("/api/reparse/{receipt_id}")
 def reparse_receipt(receipt_id: str):
-    pdf_bytes = db.download_pdf(receipt_id)
-    if not pdf_bytes:
-        raise HTTPException(404, "PDF not found in S3 for this receipt")
+    file_bytes = db.download_pdf(receipt_id)
+    if not file_bytes:
+        raise HTTPException(404, "Receipt file not found in S3")
+    head = file_bytes[:4]
     try:
-        parsed = receipt_parser.parse_receipt_pdf(pdf_bytes, model="premier")
+        if head == b'%PDF':
+            parsed = receipt_parser.parse_receipt_pdf(file_bytes, model="premier")
+            model_label = "premier"
+        else:
+            # Image receipt (JPG/PNG/etc.) — re-run via image parser.
+            if head[:3] == b'\xff\xd8\xff':
+                fmt = "jpeg"
+            elif head == b'\x89PNG':
+                fmt = "png"
+            elif head == b'RIFF':
+                fmt = "webp"
+            elif head == b'GIF8':
+                fmt = "gif"
+            else:
+                raise HTTPException(400, "Unsupported receipt file format")
+            parsed = receipt_parser.parse_receipt_image(file_bytes, fmt, model="premier")
+            model_label = "premier"
+    except HTTPException:
+        raise
     except Exception as e:
-        import logging; logging.getLogger(__name__).error(f"Premier reparse error: {e}", exc_info=True)
-        raise HTTPException(500, "Premier reparse failed. Please try again.")
+        import logging; logging.getLogger(__name__).error(f"Reparse error: {e}", exc_info=True)
+        raise HTTPException(500, "Reparse failed. Please try again.")
     db.update_receipt_items(
         receipt_id,
         items=parsed.get("items", []),
         store=parsed.get("store", ""),
         receipt_date=parsed.get("receipt_date", ""),
     )
-    return {"items": len(parsed.get("items", [])), "model": "premier"}
+    return {"items": len(parsed.get("items", [])), "model": model_label}
 
 
 try:

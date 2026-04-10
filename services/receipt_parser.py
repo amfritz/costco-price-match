@@ -62,20 +62,9 @@ def _call_model(content, prompt, model_id):
     return resp["output"]["message"]["content"][0]["text"]
 
 
-def _parse_premier(pdf_bytes: bytes) -> dict:
-    """Two-call image approach: extract items and prices separately, then zip."""
-    import fitz
-
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    # Try 300 DPI first, fall back to 150 if image is too large (>20MB)
-    pix = doc[0].get_pixmap(dpi=300)
-    img_bytes = pix.tobytes("png")
-    if len(img_bytes) > 20 * 1024 * 1024:
-        pix = doc[0].get_pixmap(dpi=150)
-        img_bytes = pix.tobytes("png")
-    doc.close()
-
-    img_content = [{"image": {"format": "png", "source": {"bytes": img_bytes}}}]
+def _parse_premier_image(img_bytes: bytes, fmt: str = "png") -> dict:
+    """Three-call image approach: extract items, prices, and meta separately, then zip."""
+    img_content = [{"image": {"format": fmt, "source": {"bytes": img_bytes}}}]
 
     # Three parallel-safe calls
     items_raw = _call_model(img_content, _ITEMS_PROMPT, MODEL_PREMIER)
@@ -211,8 +200,12 @@ def _post_process(items: list) -> list:
     return merged
 
 
-def parse_receipt_image(img_bytes: bytes, fmt: str = "png") -> dict:
-    """Parse receipt from an image (PNG, JPEG, etc.) using Nova Lite."""
+def parse_receipt_image(img_bytes: bytes, fmt: str = "png", model: str = "lite") -> dict:
+    """Parse receipt from an image. Lite=single-call, Premier=three-call accuracy path."""
+    if model == "premier":
+        result = _parse_premier_image(img_bytes, fmt)
+        result["items"] = _post_process(result.get("items", []))
+        return result
     response = _bedrock.converse(
         modelId=MODEL_LITE,
         messages=[{
@@ -235,9 +228,18 @@ def parse_receipt_image(img_bytes: bytes, fmt: str = "png") -> dict:
 
 
 def parse_receipt_pdf(pdf_bytes: bytes, model: str = "lite") -> dict:
-    """Parse receipt PDF. Lite=fast single-call, Premier=two-call image approach."""
+    """Parse receipt PDF. Lite=fast single-call, Premier=three-call image approach."""
     if model == "premier":
-        result = _parse_premier(pdf_bytes)
+        import fitz
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        # Try 300 DPI first, fall back to 150 if image is too large (>20MB)
+        pix = doc[0].get_pixmap(dpi=300)
+        img_bytes = pix.tobytes("png")
+        if len(img_bytes) > 20 * 1024 * 1024:
+            pix = doc[0].get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+        doc.close()
+        result = _parse_premier_image(img_bytes, "png")
     else:
         response = _bedrock.converse(
             modelId=MODEL_LITE,
