@@ -87,10 +87,10 @@ tr.item-row.selected{background:#d4f5f0;border-left:3px solid var(--teal)}
 .edit-form input{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:5px;font-size:.88em}
 .edit-form input:focus{outline:none;border-color:var(--blue)}
 .edit-form .btn-row{margin-top:14px;justify-content:flex-end}
-.receipt-card{padding:14px;background:var(--bg);border-radius:12px;margin:8px 0;border:2px solid transparent;cursor:pointer;transition:all .15s}
+.receipt-card{padding:14px;background:var(--bg);border-radius:12px;margin:8px 0;border:2px solid transparent;transition:all .15s}
 .receipt-card:hover{border-color:var(--teal);background:#f0faf8}
 .receipt-card.selected{border-color:var(--teal);background:#d4f5f0}
-.receipt-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.receipt-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:pointer;user-select:none}
 .receipt-title{font-weight:600;font-size:.92em}
 .receipt-stats{display:flex;gap:12px}
 .receipt-stat{text-align:center}
@@ -238,7 +238,7 @@ tr.item-row.selected{background:#d4f5f0;border-left:3px solid var(--teal)}
 
 <script>
 const $ = id => document.getElementById(id);
-let allDeals = [], activeTab = 'all';
+let allDeals = [], activeTab = 'all', expandedReceipts = new Set();
 let CONFIG = null; // Will be set by config.js if present
 
 // Try to load config.js (Amplify environment)
@@ -615,8 +615,8 @@ async function loadReceipts() {
       const items = rc.items || [];
       const total = items.reduce((s, i) => s + (parseFloat(i.price) || 0), 0);
       const store = shortStore(rc.store || 'Unknown');
-      html += `<div class="receipt-card" data-rid="${rc.receipt_id}" onclick="toggleReceipt(this)">
-        <div class="receipt-header">
+      html += `<div class="receipt-card" data-rid="${rc.receipt_id}">
+        <div class="receipt-header" onclick="toggleReceipt(this.closest('.receipt-card'))">
           <span class="receipt-title">📋 ${rc.receipt_date || '?'} — ${store}${isEligible(rc.receipt_date) ? '' : ' <span style="background:#fce8eb;color:#c5221f;padding:1px 8px;border-radius:4px;font-size:.68em;font-weight:600;margin-left:6px">Past 30 days</span>'} <button class="edit-btn" onclick="event.stopPropagation();editReceipt('${rc.receipt_id}','${(rc.receipt_date||'').replace(/'/g,"\\'")}','${(rc.store||'').replace(/'/g,"\\'")}')" title="Edit date/store">✏️</button></span>
           <div class="receipt-stats">
             <button class="btn icon-btn" onclick="event.stopPropagation();reparseReceipt('${rc.receipt_id}',this)" title="Reparse with Premier AI">🔄</button>
@@ -631,17 +631,25 @@ async function loadReceipts() {
       items.forEach((i, idx) => {
         const tpd = i.tpd ? `<span style="background:#fff3cd;color:#856404;padding:1px 6px;border-radius:4px;font-size:.72em;font-weight:600;margin-left:4px">TPD</span>` : '';
         const orig = i.original_price ? `<span style="text-decoration:line-through;color:var(--muted);font-size:.85em;margin-left:4px">$${i.original_price}</span>` : '';
-        html += `<tr class="item-row" onclick="selectRow(this)" data-rid="${rc.receipt_id}" data-idx="${idx}" data-item='${JSON.stringify(i).replace(/'/g,"&#39;")}'>
+        html += `<tr class="item-row" onclick="editItem(this)" data-rid="${rc.receipt_id}" data-idx="${idx}" data-item='${JSON.stringify(i).replace(/'/g,"&#39;")}'>
           <td>${i.name}${tpd}</td><td class="item-num">${i.item_number||''}</td><td style="font-weight:600;color:var(--green)">$${i.price}${orig}</td><td>${i.qty||1}</td>
-          <td><button class="edit-btn" onclick="event.stopPropagation();editItem(this.parentElement.parentElement)" title="Edit">✏️</button></td></tr>`;
+          <td><button class="edit-btn" onclick="event.stopPropagation();editItem(this.closest('tr'))" title="Edit">✏️</button></td></tr>`;
       });
       html += '</table></div></div>';
     });
     $('receiptsArea').innerHTML = html;
+    expandedReceipts.forEach(rid => {
+      const card = document.querySelector(`.receipt-card[data-rid="${rid}"]`);
+      if (card) card.classList.add('expanded');
+    });
   } catch(e) { $('receiptsArea').innerHTML = '<div class="empty">❌ Failed to load</div>'; }
 }
 
-function toggleReceipt(el) { el.classList.toggle('expanded'); }
+function toggleReceipt(el) {
+  el.classList.toggle('expanded');
+  if (el.classList.contains('expanded')) expandedReceipts.add(el.dataset.rid);
+  else expandedReceipts.delete(el.dataset.rid);
+}
 
 function selectRow(tr) {
   document.querySelectorAll('tr.item-row.selected').forEach(r => r.classList.remove('selected'));
@@ -658,7 +666,7 @@ function editItem(tr) {
     <h3>✏️ Edit Item</h3>
     <label>Name</label><input id="ed_name" value="${(item.name||'').replace(/"/g,'&quot;')}">
     <label>Item #</label><input id="ed_num" value="${item.item_number||''}">
-    <label>Price</label><input id="ed_price" value="${item.price||''}">
+    <label>Price</label><input id="ed_price" inputmode="decimal" value="${item.price||''}">
     <label>Qty</label><input id="ed_qty" value="${item.qty||'1'}">
     <div style="display:flex;gap:6px;margin-top:14px;align-items:center">
       <button class="btn btn-danger" onclick="deleteItem('${rid}',${idx},this)">🗑️ Delete</button>

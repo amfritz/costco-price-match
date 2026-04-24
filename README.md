@@ -2,7 +2,7 @@
 
 AI-powered tool that scans your Costco receipts, cross-references purchases against active US deals, and tells you exactly which items dropped in price and how much you can get back at the membership counter.
 
-A weekly agent runs every Friday at 9pm ET, generates a formatted HTML report, and emails it to you via SES.
+A weekly agent runs every Friday at 9pm ET, generates a formatted HTML report, and emails it to you via Resend.
 
 Forked from [the original Canadian version](https://github.com/waltsims/costco-price-match) and adapted for US Costco deal sources.
 
@@ -34,7 +34,7 @@ Forked from [the original Canadian version](https://github.com/waltsims/costco-p
 - **iOS App**: Native SwiftUI, zero third-party dependencies, 0.9s builds
 - **API**: API Gateway HTTP API → Lambda (FastAPI + Mangum), streaming analysis responses
 - **AI**: Amazon Nova 2 Lite for parsing + analysis, Nova Premier for complex receipts
-- **Automation**: AgentCore Runtime triggered by EventBridge Scheduler universal target (no Lambda middleman), SES for email
+- **Automation**: AgentCore Runtime triggered by EventBridge Scheduler universal target (no Lambda middleman), Resend for email
 - **Storage**: DynamoDB (receipts + deals), S3 (receipt files with presigned URLs)
 - **Infrastructure**: CDK (TypeScript), 3 stacks, deploy to any region
 
@@ -61,17 +61,42 @@ Opens on `http://localhost:8000`. Auto-fetches DynamoDB/S3 resource names from t
 ```bash
 cd infra && npm install && cd ..
 
-# Deploy Lambda, Amplify, API Gateway, Cognito, DynamoDB, S3
-NOTIFY_EMAIL=your-email@example.com ./deploy.sh
+# Deploy web app (Lambda, Amplify, API Gateway, Cognito, DynamoDB, S3)
+./deploy.sh
 
-# Deploy weekly agent (SES verification email sent on first deploy)
-cd infra && npx cdk deploy CostcoScannerAgentCore \
-  -c region=us-east-1 \
-  -c notifyEmail=your-email@example.com \
-  --require-approval never
+# Also deploy the weekly email agent (first time only)
+NOTIFY_EMAIL=your-email@example.com ./deploy.sh
 
 # Deploy frontend changes only (no CDK/Docker rebuild)
 ./deploy.sh --static-only
+```
+
+`NOTIFY_EMAIL` is only required on the first deploy of AgentCore. After that, recipients and the API key live in SSM Parameter Store and can be updated without redeploying.
+
+### SSM Parameter Store
+
+The weekly agent reads these two parameters at runtime:
+
+**Resend API key** — stored as SecureString, set after first deploy:
+```bash
+# Set (get your key at resend.com)
+aws ssm put-parameter --name /costco-scanner/resend-api-key \
+  --value "re_YOUR_KEY_HERE" --type SecureString --overwrite
+
+# Get
+aws ssm get-parameter --name /costco-scanner/resend-api-key \
+  --with-decryption --query Parameter.Value --output text
+```
+
+**Email recipients** — comma-separated, change anytime without redeploying:
+```bash
+# Set
+aws ssm put-parameter --name /costco-scanner/notify-emails \
+  --value "you@example.com,other@example.com" --type String --overwrite
+
+# Get
+aws ssm get-parameter --name /costco-scanner/notify-emails \
+  --query Parameter.Value --output text
 ```
 
 After deploy, the CDK output shows your API Gateway URL. Paste it into the iOS app's Settings to connect.

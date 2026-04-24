@@ -21,8 +21,13 @@ pip install -r requirements.txt
 ### Deploy (all stacks)
 ```bash
 cd infra && npm install && cd ..
-NOTIFY_EMAIL=your-email@example.com ./deploy.sh
+./deploy.sh                                       # web app only
+NOTIFY_EMAIL=your-email@example.com ./deploy.sh  # also deploys AgentCore (first time only)
 ```
+
+After AgentCore is deployed, recipients and Resend API key live in SSM — no redeploy needed:
+- `/costco-scanner/resend-api-key` (SecureString) — Resend API key
+- `/costco-scanner/notify-emails` (String) — comma-separated recipient list
 
 ### Deploy static files only (frontend changes)
 ```bash
