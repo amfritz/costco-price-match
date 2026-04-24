@@ -27,12 +27,14 @@ const amplifyStack = new AmplifyStack(app, 'CostcoScannerAmplify', {
   notifyEmail,
 });
 
-// AgentCore Runtime (weekly scan + SES email)
+// AgentCore Runtime (weekly scan + Resend email)
+const resendFromEmail = app.node.tryGetContext('resendFromEmail') || '';
 if (notifyEmail) {
   new AgentCoreStack(app, 'CostcoScannerAgentCore', {
     env,
     commonStack,
     notifyEmail,
     notifyEmails: notifyEmails || notifyEmail,
+    resendFromEmail: resendFromEmail || notifyEmail,
   });
 }

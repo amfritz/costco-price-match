@@ -1,4 +1,4 @@
-"""AgentCore Runtime entry point — weekly Costco price match scan + SES HTML report."""
+"""AgentCore Runtime entry point — weekly Costco price match scan + Resend HTML report."""
 
 import logging
 import os
@@ -7,6 +7,7 @@ from typing import Any
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 import boto3
+import resend
 from services.price_scanner import scan_price_drops
 from services.analyzer import run_analysis
 
@@ -16,11 +17,19 @@ app = BedrockAgentCoreApp()
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
-SENDER = os.environ.get("NOTIFY_EMAIL", "")
-RECIPIENTS = [e.strip() for e in os.environ.get("NOTIFY_EMAILS", os.environ.get("NOTIFY_EMAIL", "")).split(",") if e.strip()]
+SENDER = os.environ.get("RESEND_FROM_EMAIL", "")
 
 s3 = boto3.client("s3", region_name=REGION)
-ses = boto3.client("ses", region_name=REGION)
+_ssm = boto3.client("ssm", region_name=REGION)
+
+
+def _init_resend() -> list[str]:
+    """Fetch Resend API key and recipient list from SSM, returns recipients."""
+    resend.api_key = _ssm.get_parameter(
+        Name="/costco-scanner/resend-api-key", WithDecryption=True
+    )["Parameter"]["Value"]
+    recipients_raw = _ssm.get_parameter(Name="/costco-scanner/notify-emails")["Parameter"]["Value"]
+    return [e.strip() for e in recipients_raw.split(",") if e.strip()]
 
 
 def _presign_links(text: str) -> str:
@@ -92,15 +101,14 @@ async def invoke(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         email_report = _presign_links(report)
         html_body = _md_to_html(email_report)
 
-        ses.send_email(
-            Source=SENDER,
-            Destination={"ToAddresses": RECIPIENTS},
-            Message={
-                "Subject": {"Data": "Costco Weekly Price Match Report"},
-                "Body": {"Html": {"Data": html_body}},
-            },
-        )
-        logging.info("SES HTML report sent")
+        recipients = _init_resend()
+        resend.Emails.send({
+            "from": SENDER,
+            "to": recipients,
+            "subject": "Costco Weekly Price Match Report",
+            "html": html_body,
+        })
+        logging.info("Resend email report sent")
         return {"status": "success", "deals_scanned": len(deals), "report": report}
     except Exception as e:
         logging.error(f"Error: {e}", exc_info=True)

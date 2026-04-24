@@ -1,22 +1,44 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as agentcore from '@aws-cdk/aws-bedrock-agentcore-alpha';
-import * as ses from 'aws-cdk-lib/aws-ses';
 import { Construct } from 'constructs';
 import { CommonStack } from './common-stack';
 
 interface AgentCoreStackProps extends cdk.StackProps {
   commonStack: CommonStack;
   notifyEmail: string;
-  notifyEmails?: string;  // comma-separated list of all recipients
+  notifyEmails?: string;
+  resendFromEmail?: string;
 }
 
 export class AgentCoreStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: AgentCoreStackProps) {
     super(scope, id, props);
 
-    const { commonStack, notifyEmail, notifyEmails } = props;
+    const { commonStack, notifyEmail, notifyEmails, resendFromEmail } = props;
+
+    // Resend API key in SSM Parameter Store (SecureString).
+    // Set the real value after deploy — never commit it:
+    //   aws ssm put-parameter --name /costco-scanner/resend-api-key \
+    //     --value "re_YOUR_KEY_HERE" --type SecureString --overwrite
+    const resendKeyParam = new ssm.StringParameter(this, 'ResendApiKey', {
+      parameterName: '/costco-scanner/resend-api-key',
+      stringValue: 'REPLACE_ME',
+      description: 'Resend API key for weekly email reports',
+      tier: ssm.ParameterTier.STANDARD,
+    });
+
+    // Notify email recipients — update anytime without redeploying:
+    //   aws ssm put-parameter --name /costco-scanner/notify-emails \
+    //     --value "you@example.com,other@example.com" --type String --overwrite
+    const notifyEmailsParam = new ssm.StringParameter(this, 'NotifyEmails', {
+      parameterName: '/costco-scanner/notify-emails',
+      stringValue: notifyEmails || notifyEmail,
+      description: 'Comma-separated list of weekly report recipients',
+      tier: ssm.ParameterTier.STANDARD,
+    });
 
     const role = new iam.Role(this, 'AgentCoreRole', {
       assumedBy: new iam.ServicePrincipal('bedrock-agentcore.amazonaws.com'),
@@ -36,8 +58,8 @@ export class AgentCoreStack extends cdk.Stack {
               resources: ['arn:aws:bedrock:*::foundation-model/*', `arn:aws:bedrock:*:${this.account}:inference-profile/*`],
             }),
             new iam.PolicyStatement({
-              actions: ['ses:SendEmail', 'ses:SendRawEmail'],
-              resources: ['*'],
+              actions: ['ssm:GetParameter'],
+              resources: [resendKeyParam.parameterArn, notifyEmailsParam.parameterArn],
             }),
           ],
         }),
@@ -46,7 +68,7 @@ export class AgentCoreStack extends cdk.Stack {
 
     const runtime = new agentcore.Runtime(this, 'CostcoScannerRuntime', {
       runtimeName: 'costco_scanner',
-      description: 'Weekly Costco price match scan + SES email report',
+      description: 'Weekly Costco price match scan + Resend email report',
       agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset('../', {
         file: 'agentcore.Dockerfile',
       }),
@@ -55,20 +77,10 @@ export class AgentCoreStack extends cdk.Stack {
         DYNAMODB_RECEIPTS_TABLE: commonStack.receiptsTable.tableName,
         DYNAMODB_PRICE_DROPS_TABLE: commonStack.priceDropsTable.tableName,
         S3_BUCKET: commonStack.receiptsBucket.bucketName,
-        NOTIFY_EMAIL: notifyEmail,
-        NOTIFY_EMAILS: notifyEmails || notifyEmail,
+        RESEND_FROM_EMAIL: resendFromEmail || notifyEmail,
         AWS_DEFAULT_REGION: this.region,
       },
     });
-
-    // SES identities for weekly email (sends verification on first deploy)
-    const allEmails = new Set((notifyEmails || notifyEmail).split(',').map(e => e.trim()).filter(Boolean));
-    allEmails.add(notifyEmail); // sender always needs verification
-    let sesIdx = 0;
-    for (const email of allEmails) {
-      new ses.CfnEmailIdentity(this, `SesIdentity${sesIdx || ''}`, { emailIdentity: email });
-      sesIdx++;
-    }
 
     new cdk.CfnOutput(this, 'RuntimeId', {
       value: runtime.agentRuntimeId,
