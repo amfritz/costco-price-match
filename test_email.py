@@ -4,8 +4,8 @@ import re
 import boto3
 
 SEND_EMAIL = True
-SENDER = "costco@functionalnotpretty.com"
-RECIPIENTS = ["amfritz@gmail.com"]
+SENDER = os.environ.get("RESEND_FROM_EMAIL", "")
+RECIPIENTS = [e.strip() for e in os.environ.get("NOTIFY_EMAILS", "").split(",") if e.strip()]
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 # Auto-fetch resource names from CloudFormation BEFORE importing services
