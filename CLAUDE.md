@@ -29,6 +29,14 @@ After AgentCore is deployed, recipients and Resend API key live in SSM — no re
 - `/costco-scanner/resend-api-key` (SecureString) — Resend API key
 - `/costco-scanner/notify-emails` (String) — comma-separated recipient list
 
+> **Before the next full deploy of `CostcoScannerAmplify`:** the custom domain
+> (`costco.dunkinspeeps.com`) was created by hand in the console and is now declared in
+> `infra/lib/amplify-stack.ts`, but CloudFormation does not track it yet — deploying as-is
+> fails with a CREATE conflict on the existing domain association. Adopt it first via
+> `npx cdk import CostcoScannerAmplify`. The resource ARN and the reason the apex is *not*
+> mapped (dunkinspeeps.com is a separate Railway site; DNS is on Cloudflare) are in the
+> comment at the `addDomain` call. `./deploy.sh --static-only` is unaffected.
+
 ### Deploy static files only (frontend changes)
 ```bash
 ./deploy.sh --static-only

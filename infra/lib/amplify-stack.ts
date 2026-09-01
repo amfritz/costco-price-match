@@ -294,7 +294,40 @@ export class AmplifyStack extends cdk.Stack {
       description: 'Costco Receipt Scanner & Price Match',
     });
 
-    this.amplifyApp.addBranch('main');
+    const mainBranch = this.amplifyApp.addBranch('main');
+
+    // Custom domain: costco.dunkinspeeps.com
+    //
+    // dunkinspeeps.com is shared across three systems and only the `costco`
+    // subdomain belongs to this app:
+    //   - DNS for the zone is on Cloudflare, not Route53 (this account has no
+    //     hosted zones), so CDK never manages the DNS records. The `costco`
+    //     CNAME -> CloudFront and the ACM validation CNAME already exist in
+    //     Cloudflare and must stay there; this block only manages the AWS-side
+    //     domain association (cert + subdomain-to-branch mapping).
+    //   - The apex dunkinspeeps.com is a separate site hosted on Railway. That
+    //     is why there is no mapRoot() call here: mapping the root would point
+    //     the apex at this app and take that site down.
+    //   - enableAutoSubdomain stays off. It requires a Route53 zone in this
+    //     account, and would create subdomains this app does not own.
+    //
+    // WARNING: this documents infrastructure that already exists. The domain
+    // association was created by hand in the console, so CloudFormation does not
+    // track it. Deploying this stack as-is will FAIL -- CFN tries to CREATE an
+    // association that is already present. Before the next deploy, adopt the
+    // existing resource rather than recreating it:
+    //   npx cdk import CostcoScannerAmplify
+    // identifying it by ARN:
+    //   arn:aws:amplify:us-east-1:521355009421:apps/d18mduqqiwv5pv/domains/dunkinspeeps.com
+    // Confirm `cdk import` supports AWS::Amplify::Domain before relying on it.
+    // The fallback -- deleting the console-created association so CFN can
+    // recreate it -- drops the live certificate and re-triggers domain
+    // verification, taking costco.dunkinspeeps.com offline until DNS revalidates.
+    this.amplifyApp.addDomain('Domain', {
+      domainName: 'dunkinspeeps.com',
+      enableAutoSubdomain: false,
+      subDomains: [{ branch: mainBranch, prefix: 'costco' }],
+    });
 
     // Outputs
     new cdk.CfnOutput(this, 'UserPoolId', {
