@@ -556,6 +556,26 @@ function handleCameraCapture(input) {
   }
 }
 
+// Lambda caps request payloads at 6 MB (base64-encoded, so ~4.4 MB of file) and API
+// Gateway rejects >10 MB, so full-size phone photos never reach the parser. Mirror the
+// server's own prep (receipt_parser._prepare_image: 3000px long edge, JPEG q90) in the
+// browser -- no accuracy is lost, and the browser applies EXIF rotation while drawing.
+const UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
+async function shrinkImage(file) {
+  if (!file.type.startsWith('image/') || file.size <= UPLOAD_MAX_BYTES) return file;
+  const bmp = await createImageBitmap(file, {imageOrientation: 'from-image'});
+  const scale = Math.min(1, 3000 / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bmp.width * scale); canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  for (const q of [0.9, 0.8, 0.7]) {
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', q));
+    if (blob.size <= UPLOAD_MAX_BYTES) return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', {type: 'image/jpeg'});
+  }
+  throw new Error('Photo too large even after resizing');
+}
+
 // Upload multiple files sequentially
 async function uploadReceipts() {
   const files = $('pdfFile').files;
@@ -567,8 +587,10 @@ async function uploadReceipts() {
     const st = document.getElementById('ufs'+i);
     st.textContent = '⏳ Parsing...'; st.style.color = 'var(--blue)';
     bar.style.width = '30%';
-    const fd = new FormData(); fd.append('file', files[i]);
     try {
+      const file = await shrinkImage(files[i]);
+      if (file.size > UPLOAD_MAX_BYTES) throw new Error(`File too large (${(file.size/1048576).toFixed(1)} MB, max 4 MB)`);
+      const fd = new FormData(); fd.append('file', file);
       const r = await apiFetch('/api/upload', {method:'POST', body:fd});
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail);
