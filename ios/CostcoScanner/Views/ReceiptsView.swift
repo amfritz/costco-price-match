@@ -44,7 +44,7 @@ struct ReceiptsView: View {
                         }
                         if !receipts.isEmpty {
                             Button(role: .destructive) { showClearConfirm = true } label: {
-                                Label("Clear All", systemImage: "trash")
+                                Label("Clear Expired", systemImage: "trash")
                             }
                         }
                     } label: {
@@ -62,8 +62,8 @@ struct ReceiptsView: View {
                     .padding(24).background(.ultraThinMaterial).cornerRadius(16)
                 }
             }
-            .confirmationDialog("Delete all receipts?", isPresented: $showClearConfirm, titleVisibility: .visible) {
-                Button("Delete All", role: .destructive) { Task { await clearAll() } }
+            .confirmationDialog("Delete receipts older than 30 days?", isPresented: $showClearConfirm, titleVisibility: .visible) {
+                Button("Delete Expired", role: .destructive) { Task { await clearExpired() } }
             }
             .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [UTType.pdf], allowsMultipleSelection: true) { result in
                 Task { await handleFiles(result) }
@@ -118,10 +118,10 @@ struct ReceiptsView: View {
         Task { for r in toDelete { try? await APIClient.shared.delete("/api/receipt/\(r.receipt_id)") } }
     }
 
-    private func clearAll() async {
+    private func clearExpired() async {
         do {
             try await APIClient.shared.delete("/api/receipts")
-            receipts = []
+            await loadReceipts()
         } catch { self.error = error.localizedDescription }
     }
 }

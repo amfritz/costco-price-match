@@ -67,8 +67,21 @@ def get_receipt(receipt_id: str) -> dict | None:
     return resp.get("Item")
 
 
-def clear_receipts():
-    _batch_delete(RECEIPTS_TABLE, "receipt_id")
+def clear_expired_receipts(days: int = 30) -> int:
+    """Delete receipts older than the price-adjustment window; returns how many.
+
+    Only the DynamoDB rows go -- the files stay in S3 so a receipt can be recovered.
+    Receipts with no date are kept, since there's no way to tell whether they're expired.
+    """
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    table = _ddb.Table(RECEIPTS_TABLE)
+    expired = [r for r in table.scan()["Items"]
+               if "" < (r.get("receipt_date") or r.get("upload_date") or "")[:10] < cutoff]
+    with table.batch_writer() as batch:
+        for r in expired:
+            batch.delete_item(Key={"receipt_id": r["receipt_id"]})
+    return len(expired)
 
 
 def delete_receipt(receipt_id: str):

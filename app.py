@@ -85,9 +85,9 @@ def list_receipts():
 
 
 @app.delete("/api/receipts")
-def clear_all_receipts():
-    db.clear_receipts()
-    return {"message": "All receipts deleted"}
+def clear_expired_receipts():
+    deleted = db.clear_expired_receipts()
+    return {"message": f"Deleted {deleted} expired receipts", "deleted": deleted}
 
 
 @app.delete("/api/receipt/{receipt_id}")

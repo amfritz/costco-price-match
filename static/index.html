@@ -228,7 +228,7 @@ tr.item-row.selected{background:#d4f5f0;border-left:3px solid var(--teal)}
     <h2>🧾 Receipts</h2>
     <div class="btn-row">
       <button class="btn btn-ghost icon-btn" onclick="loadReceipts()" title="Refresh list">↻</button>
-      <button class="btn btn-danger" onclick="clearReceipts()" title="Delete all receipts">🗑️</button>
+      <button class="btn btn-danger" onclick="clearReceipts()" title="Delete expired receipts">🗑️</button>
     </div>
   </div>
   <div id="receiptsArea"></div>
@@ -779,7 +779,7 @@ async function deleteReceipt(rid) {
 }
 
 async function clearReceipts() {
-  if (!confirm('Delete all receipts?')) return;
+  if (!confirm('Delete expired receipts (older than 30 days)? Newer receipts are kept.')) return;
   await apiFetch('/api/receipts', {method:'DELETE'});
   loadReceipts();
 }
