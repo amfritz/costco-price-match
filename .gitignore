@@ -52,3 +52,7 @@ diagrams/*.mmd
 # Xcode user data
 xcuserdata/
 *.xcuserstate
+
+# Model experiments: local receipt/deal snapshots
+experiments/data/
+experiments/results/

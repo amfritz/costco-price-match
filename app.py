@@ -62,7 +62,7 @@ async def upload_receipt(file: UploadFile = File(...)):
         raise HTTPException(400, "File content does not match a supported image format")
     try:
         if is_image:
-            parsed = receipt_parser.parse_receipt_image(file_bytes, IMAGE_EXTENSIONS[ext])
+            parsed = receipt_parser.parse_receipt_image(file_bytes)
         else:
             parsed = receipt_parser.parse_receipt_pdf(file_bytes)
     except Exception as e:
@@ -222,26 +222,14 @@ def reparse_receipt(receipt_id: str):
     if not file_bytes:
         raise HTTPException(404, "Receipt file not found in S3")
     head = file_bytes[:4]
+    if head != b'%PDF' and head[:3] != b'\xff\xd8\xff' and head not in (b'\x89PNG', b'RIFF', b'GIF8'):
+        raise HTTPException(400, "Unsupported receipt file format")
     try:
+        # Files are stored under a .pdf key even when they are photos, so detect by magic bytes.
         if head == b'%PDF':
-            parsed = receipt_parser.parse_receipt_pdf(file_bytes, model="premier")
-            model_label = "premier"
+            parsed = receipt_parser.parse_receipt_pdf(file_bytes)
         else:
-            # Image receipt (JPG/PNG/etc.) — re-run via image parser.
-            if head[:3] == b'\xff\xd8\xff':
-                fmt = "jpeg"
-            elif head == b'\x89PNG':
-                fmt = "png"
-            elif head == b'RIFF':
-                fmt = "webp"
-            elif head == b'GIF8':
-                fmt = "gif"
-            else:
-                raise HTTPException(400, "Unsupported receipt file format")
-            parsed = receipt_parser.parse_receipt_image(file_bytes, fmt, model="premier")
-            model_label = "premier"
-    except HTTPException:
-        raise
+            parsed = receipt_parser.parse_receipt_image(file_bytes)
     except Exception as e:
         import logging; logging.getLogger(__name__).error(f"Reparse error: {e}", exc_info=True)
         raise HTTPException(500, "Reparse failed. Please try again.")
@@ -251,7 +239,7 @@ def reparse_receipt(receipt_id: str):
         store=parsed.get("store", ""),
         receipt_date=parsed.get("receipt_date", ""),
     )
-    return {"items": len(parsed.get("items", [])), "model": model_label}
+    return {"items": len(parsed.get("items", [])), "model": receipt_parser.MODEL_ID}
 
 
 try:

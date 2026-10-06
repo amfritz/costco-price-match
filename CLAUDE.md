@@ -66,7 +66,7 @@ No automated test suite exists.
 
 ### Backend services (`services/`)
 - **`db.py`** — DynamoDB (CostcoReceipts, CostcoPriceDrops tables) + S3 (receipt files with presigned URLs). Deduplicates receipts by file hash.
-- **`receipt_parser.py`** — Parses receipts via Bedrock Nova. Three modes: Lite (single-call PDF), Premier (converts to PNG, 3 parallel calls for accuracy), and direct image parsing (JPG/PNG from camera). Post-processes TPD merging, item number extraction with OCR correction (O→0, B→8).
+- **`receipt_parser.py`** — Parses receipts with Claude Sonnet 4.6 on Bedrock in a single Converse call. Photos are EXIF-rotated upright and downscaled first (phone photos are stored sideways; sending raw pixels wrecked accuracy); PDFs are rendered to page images. Post-processes TPD merging, item number extraction with OCR correction (O→0, B→8). Model choice is backed by `experiments/parse_bench.py`.
 - **`price_scanner.py`** — Scrapes 5 US deal sources (Reddit r/Costco, Reddit r/CostcoDeals, KCL Costco Deals, KCL Coupon Book, CostcoFan). Returns `(deals, source_results)` tuple for per-source observability. Caches per calendar day, deduplicates by (item_name, promo_end).
 - **`analyzer.py`** — Strands Agents framework with Nova 2 Lite. Tool-based matching: exact item number → partial item number → keyword overlap. Streams results via SSE.
 
@@ -79,7 +79,7 @@ Three stacks: **CommonStack** (DynamoDB, S3, ECR), **AmplifyStack** (Cognito wit
 
 ### Key patterns
 - `/api/config` is the only unauthenticated endpoint (returns Cognito pool info for BYOI)
-- `/api/upload` accepts PDF, JPG, PNG, WebP, GIF — images are sent directly to Bedrock Nova
+- `/api/upload` accepts PDF, JPG, PNG, WebP, GIF — the original file is stored in S3 under `receipts/<id>.pdf` even when it is an image, so detect type by magic bytes
 - `/api/analyze` uses Server-Sent Events for streaming agent output
 - Receipt files stored in S3 with 7-day presigned URLs
 - Price scanner uses random User-Agent rotation and 1-second rate limiting between sources

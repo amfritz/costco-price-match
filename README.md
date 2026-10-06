@@ -11,7 +11,7 @@ Forked from [the original Canadian version](https://github.com/waltsims/costco-p
 ## How It Works
 
 1. Upload receipt PDFs or snap a photo with your phone's camera
-2. Amazon Nova AI parses every line item, price, item number, and TPD (Temporary Price Drop)
+2. Claude Sonnet 4.6 on Amazon Bedrock parses every line item, price, item number, and TPD (Temporary Price Drop)
 3. Scrapers pull current deals from Reddit r/Costco, Reddit r/CostcoDeals, KrazyCouponLady, and CostcoFan
 4. AI cross-references your purchases against active deals
 5. Weekly agent emails you a report with price adjustment opportunities and TPD savings already applied
@@ -22,7 +22,7 @@ Forked from [the original Canadian version](https://github.com/waltsims/costco-p
 
 - **US deal sources** — Replaced 6 Canadian sources (CocoWest, CocoEast, RedFlagDeals, SmartCanucks, etc.) with 5 US sources (Reddit r/Costco, Reddit r/CostcoDeals, KCL Costco Deals, KCL Coupon Book, CostcoFan)
 - **Camera upload** — Snap a photo of your receipt directly from the web app on mobile, no PDF scanning needed
-- **Image support** — Upload JPG, PNG, WebP alongside PDFs; images are sent directly to Bedrock Nova
+- **Image support** — Upload JPG, PNG, WebP alongside PDFs; photos are auto-rotated upright before parsing
 - **Per-source observability** — Scan results show status, deal count, and duration for each scraper
 - **Passwordless auth** — Email OTP sign-in via Cognito (no passwords to manage)
 - **Mobile-responsive UI** — Styled for phone use with camera capture, touch-friendly modals
@@ -33,7 +33,7 @@ Forked from [the original Canadian version](https://github.com/waltsims/costco-p
 - **Web Frontend**: Static HTML on AWS Amplify with Cognito email OTP authentication
 - **iOS App**: Native SwiftUI, zero third-party dependencies, 0.9s builds
 - **API**: API Gateway HTTP API → Lambda (FastAPI + Mangum), streaming analysis responses
-- **AI**: Amazon Nova 2 Lite for parsing + analysis, Nova Premier for complex receipts
+- **AI**: Claude Sonnet 4.6 for receipt parsing, Amazon Nova 2 Lite for analysis
 - **Automation**: AgentCore Runtime triggered by EventBridge Scheduler universal target (no Lambda middleman), Resend for email
 - **Storage**: DynamoDB (receipts + deals), S3 (receipt files with presigned URLs)
 - **Infrastructure**: CDK (TypeScript), 3 stacks, deploy to any region
@@ -121,12 +121,12 @@ npx cdk destroy CostcoScannerCommon -c region=us-east-1
 
 ## Cost
 
-Under $1/month for personal use. Bedrock Nova tokens are the main cost (~$0.10-0.20/week). Lambda, SES, DynamoDB, API Gateway, and Amplify fall within free tier. All resources are tagged with `project: costco-price-match` for cost tracking in Cost Explorer.
+Under $1/month for personal use. Bedrock tokens are the main cost: receipt parsing is ~$0.016 per receipt with Sonnet 4.6, plus ~$0.10-0.20/week for Nova analysis. Lambda, SES, DynamoDB, API Gateway, and Amplify fall within free tier. All resources are tagged with `project: costco-price-match` for cost tracking in Cost Explorer.
 
 ## Built With
 
 - [Claude Code](https://claude.ai/code) — AI coding assistant by Anthropic (US adaptation)
 - [Kiro CLI](https://kiro.dev) — AI coding assistant by AWS (original version)
-- [Amazon Bedrock](https://aws.amazon.com/bedrock/) — Nova 2 Lite + Nova Premier
+- [Amazon Bedrock](https://aws.amazon.com/bedrock/) — Claude Sonnet 4.6 + Nova 2 Lite
 - [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/) — Runtime for the weekly agent
 - [AWS CDK](https://aws.amazon.com/cdk/) — Infrastructure as code

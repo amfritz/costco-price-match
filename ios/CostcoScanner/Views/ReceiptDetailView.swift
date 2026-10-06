@@ -96,7 +96,7 @@ struct ReceiptDetailView: View {
             if let updated = all.receipts.first(where: { $0.receipt_id == receipt.receipt_id }) {
                 receipt = updated
             }
-            error = "Reparsed with Nova Premier: \(resp.items) items"
+            error = "Reparsed: \(resp.items) items"
         } catch { self.error = error.localizedDescription }
     }
 }
