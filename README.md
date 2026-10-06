@@ -31,7 +31,6 @@ Forked from [the original Canadian version](https://github.com/waltsims/costco-p
 ## Architecture
 
 - **Web Frontend**: Static HTML on AWS Amplify with Cognito email OTP authentication
-- **iOS App**: Native SwiftUI, zero third-party dependencies, 0.9s builds
 - **API**: API Gateway HTTP API → Lambda (FastAPI + Mangum), streaming analysis responses
 - **AI**: Claude Sonnet 4.6 for receipt parsing, Amazon Nova 2 Lite for analysis
 - **Automation**: AgentCore Runtime triggered by EventBridge Scheduler universal target (no Lambda middleman), Resend for email
@@ -99,7 +98,29 @@ aws ssm get-parameter --name /costco-scanner/notify-emails \
   --query Parameter.Value --output text
 ```
 
-After deploy, the CDK output shows your API Gateway URL. Paste it into the iOS app's Settings to connect.
+### Users
+
+Sign-up is disabled: the Cognito pool is invite-only and the login page has no Sign Up link, so only users you create can sign in. They sign in with an emailed code — there are no passwords. Every user sees every receipt (see Per-user data isolation under Backlog), so only add people you'd share receipts with.
+
+```bash
+POOL_ID=$(aws cloudformation describe-stacks --stack-name CostcoScannerAmplify \
+  --query 'Stacks[0].Outputs[?OutputKey==`UserPoolId`].OutputValue' --output text)
+
+# Add a user
+aws cognito-idp admin-create-user --user-pool-id $POOL_ID \
+  --username someone@example.com \
+  --user-attributes Name=email,Value=someone@example.com Name=email_verified,Value=true \
+  --message-action SUPPRESS
+
+# List users
+aws cognito-idp list-users --user-pool-id $POOL_ID \
+  --query 'Users[].Attributes[?Name==`email`].Value' --output text
+
+# Remove a user
+aws cognito-idp admin-delete-user --user-pool-id $POOL_ID --username someone@example.com
+```
+
+This is separate from the weekly email recipients in `/costco-scanner/notify-emails` — being on that list doesn't grant a login, and a login doesn't add you to the email.
 
 ## Cleanup
 
@@ -112,7 +133,6 @@ npx cdk destroy CostcoScannerCommon -c region=us-east-1
 
 ## Backlog
 
-- **Disable self-signup** — Lock down Cognito registration once family accounts are created. Currently anyone who discovers the Amplify URL can sign up and see all receipts (no per-user data isolation).
 - **Custom domain SSL** — `costco.dunkinspeeps.com` is configured and working. Consider moving the main domain DNS to Route53 for tighter integration.
 - **Scraper resilience** — Deal sources change HTML structure without warning. The per-source observability helps detect failures, but scrapers may need periodic updates when sites change.
 - **Receipt parsing accuracy** — Camera photos of handheld receipts can produce OCR errors (wrong dates, missed items). The edit/delete item UI helps correct these, but improving the prompt or adding a second-pass validation could reduce manual fixes.

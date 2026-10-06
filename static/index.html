@@ -347,20 +347,10 @@ function showLoginUI() {
         <div id="auth-form">
           <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:15px;font-family:DM Sans,sans-serif">
           <button onclick="doRequestOtp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Send Code</button>
-          <p style="text-align:center;color:var(--muted);font-size:14px">No account? <a href="#" onclick="showSignUp();return false" style="color:var(--pink);font-weight:700">Sign Up</a></p>
         </div>
       </div>
     </div>`;
   document.body.appendChild(d);
-}
-
-function showSignUp() {
-  document.getElementById('auth-subtitle').textContent = 'Create your account';
-  document.getElementById('auth-error').style.display = 'none';
-  document.getElementById('auth-form').innerHTML = `
-    <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:15px;font-family:DM Sans,sans-serif">
-    <button onclick="doSignUp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Sign Up</button>
-    <p style="text-align:center;color:var(--muted);font-size:14px">Have an account? <a href="#" onclick="showSignIn();return false" style="color:var(--pink);font-weight:700">Sign In</a></p>`;
 }
 
 function showSignIn() {
@@ -368,8 +358,7 @@ function showSignIn() {
   document.getElementById('auth-error').style.display = 'none';
   document.getElementById('auth-form').innerHTML = `
     <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:15px;font-family:DM Sans,sans-serif">
-    <button onclick="doRequestOtp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Send Code</button>
-    <p style="text-align:center;color:var(--muted);font-size:14px">No account? <a href="#" onclick="showSignUp();return false" style="color:var(--pink);font-weight:700">Sign Up</a></p>`;
+    <button onclick="doRequestOtp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Send Code</button>`;
 }
 
 function showOtpInput(email) {
@@ -382,51 +371,10 @@ function showOtpInput(email) {
   document.getElementById('auth-code').focus();
 }
 
-function showConfirm(email) {
-  document.getElementById('auth-subtitle').textContent = 'Check your email for a verification code';
-  document.getElementById('auth-error').style.display = 'none';
-  document.getElementById('auth-form').innerHTML = `
-    <input id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Verification code" maxlength="8" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:20px;font-family:DM Sans,sans-serif;text-align:center;letter-spacing:6px">
-    <button onclick="doConfirm('${email}')" class="btn btn-primary" style="width:100%;padding:12px;font-size:15px">Confirm & Sign In</button>`;
-  document.getElementById('auth-code').focus();
-}
-
 function authError(msg) {
   const el = document.getElementById('auth-error');
   el.textContent = msg;
   el.style.display = 'block';
-}
-
-async function doSignUp() {
-  const email = document.getElementById('auth-email').value;
-  if (!email) return authError('Email is required');
-  // Generate a random password (user never sees this — sign-in is OTP only)
-  const rnd = crypto.getRandomValues(new Uint8Array(20));
-  const randomPass = 'P!' + Array.from(rnd, b => b.toString(36)).join('').slice(0, 18) + 'aA1';
-  try {
-    await cognitoApi('SignUp', {
-      ClientId: CONFIG.COGNITO_CLIENT_ID,
-      Username: email,
-      Password: randomPass,
-      UserAttributes: [{ Name: 'email', Value: email }],
-    });
-    showConfirm(email);
-  } catch(e) { authError(e.message); }
-}
-
-async function doConfirm(email) {
-  const code = document.getElementById('auth-code').value;
-  if (!code) return authError('Enter the verification code');
-  try {
-    await cognitoApi('ConfirmSignUp', {
-      ClientId: CONFIG.COGNITO_CLIENT_ID,
-      Username: email,
-      ConfirmationCode: code,
-    });
-    // Account confirmed — now sign in via OTP
-    document.getElementById('auth-subtitle').textContent = 'Account confirmed! Sending sign-in code...';
-    doRequestOtp(email);
-  } catch(e) { authError(e.message); }
 }
 
 async function doRequestOtp(emailOverride) {

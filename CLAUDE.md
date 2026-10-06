@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Costco Receipt Scanner & Price Match Agent — AI-powered tool that scans Costco receipts (PDF or camera photo), cross-references purchases against active US deals from 5 sources, and identifies price adjustment opportunities. Includes a web UI, native iOS app, and a weekly automated email agent.
+Costco Receipt Scanner & Price Match Agent — AI-powered tool that scans Costco receipts (PDF or camera photo), cross-references purchases against active US deals from 5 sources, and identifies price adjustment opportunities. Includes a web UI and a weekly automated email agent.
 
 BYOI (Bring Your Own Infrastructure) model: users deploy CDK to their own AWS account. No SaaS backend.
 
@@ -28,6 +28,9 @@ NOTIFY_EMAIL=your-email@example.com ./deploy.sh  # also deploys AgentCore (first
 After AgentCore is deployed, recipients and Resend API key live in SSM — no redeploy needed:
 - `/costco-scanner/resend-api-key` (SecureString) — Resend API key
 - `/costco-scanner/notify-emails` (String) — comma-separated recipient list
+
+### Users
+Sign-up is disabled (Cognito `AllowAdminCreateUserOnly`, no Sign Up UI) because every user sees every receipt. Add or remove users with `aws cognito-idp admin-create-user` / `admin-delete-user` — the README "Users" section has the exact commands. Users sign in with an email OTP; there are no passwords. The notify-emails list is unrelated to who can log in.
 
 ### Deploy static files only (frontend changes)
 ```bash
@@ -65,12 +68,11 @@ No automated test suite exists.
 ### Infrastructure (`infra/`, AWS CDK TypeScript)
 Three stacks: **CommonStack** (DynamoDB, S3, ECR), **AmplifyStack** (Cognito with email OTP, Lambda, API Gateway, Amplify hosting), **AgentCoreStack** (runtime, EventBridge scheduler, SES).
 
-### Frontends
+### Frontend
 - **Web** (`static/index.html`) — Single HTML file, SPA with passwordless email OTP auth (Cognito USER_AUTH flow, no SDK dependency). Config injected at deploy via `static/config.js`. Mobile-responsive with camera capture for receipt photos.
-- **iOS** (`ios/CostcoScanner/`) — Native SwiftUI, zero dependencies, pure URLSession + Cognito REST API. BYOI flow: paste API URL → auto-fetches credentials from `/api/config`.
 
 ### Key patterns
-- `/api/config` is the only unauthenticated endpoint (returns Cognito pool info for BYOI)
+- Every API route requires a Cognito JWT except CORS preflight (OPTIONS). The iOS app this was forked with was removed along with its unauthenticated `/api/config` credentials endpoint — don't reintroduce one.
 - `/api/upload` accepts PDF, JPG, PNG, WebP, GIF — the original file is stored in S3 under `receipts/<id>.pdf` even when it is an image, so detect type by magic bytes
 - `/api/analyze` uses Server-Sent Events for streaming agent output
 - Receipt files stored in S3 with 7-day presigned URLs
