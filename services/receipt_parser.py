@@ -1,6 +1,7 @@
 import boto3
 import io
 import json
+import logging
 import re
 import os
 
@@ -22,6 +23,8 @@ Return ONLY valid JSON with this exact structure, no other text:
 {
   "store": "store location or number",
   "receipt_date": "YYYY-MM-DD",
+  "subtotal": "123.45",
+  "items_sold": "17",
   "items": [
     {"name": "ITEM NAME", "price": "12.99", "qty": "1", "item_number": "1234567"}
   ]
@@ -35,7 +38,12 @@ Rules:
 - Do NOT merge or combine any lines
 - Do NOT skip any lines
 - Ignore tax lines, subtotals, totals, payment lines
-- receipt_date should be extracted from the receipt date field"""
+- receipt_date should be extracted from the receipt date field
+- subtotal = the SUBTOTAL amount; items_sold = the "TOTAL NUMBER OF ITEMS SOLD" / "Items Sold" count. Empty string if not shown.
+- The same item can appear on several consecutive identical lines; each one is a separate purchase and must be listed"""
+
+_RECHECK_PROMPT = """Your items do not reconcile with the receipt: they add up to ${got_sum} across {got_count} items, but the receipt shows SUBTOTAL ${subtotal} and {items_sold} items sold.
+Re-read the receipt line by line, top to bottom. Common causes: a repeated identical line was listed once, a line was skipped, a digit was misread, or a discount line ("/ 1234567" with a price ending in "-") was given without its minus sign. Return the complete corrected JSON in the same format."""
 
 _NOISE_PATTERNS = re.compile(
     r"^(AGE\s*VERIFIED|DEPOSIT|L\d+\s*MEMBER|N\d+\s*MEMBER|\d+\s*@\s*[\d.]+)",
@@ -67,18 +75,59 @@ def _pdf_to_images(pdf_bytes: bytes) -> list:
     return images
 
 
-def _extract(images: list) -> dict:
-    """Single Converse call over one or more receipt images, then shared post-processing."""
-    content = [{"image": {"format": "jpeg", "source": {"bytes": img}}} for img in images]
+def _converse(messages: list) -> tuple:
     response = _bedrock.converse(
-        modelId=MODEL_ID,
-        messages=[{"role": "user", "content": content + [{"text": EXTRACTION_PROMPT}]}],
+        modelId=MODEL_ID, messages=messages,
         inferenceConfig={"maxTokens": 8192, "temperature": 0},
     )
     text = "".join(c.get("text", "") for c in response["output"]["message"]["content"])
     start, end = text.find("{"), text.rfind("}")
     result = json.loads(text[start:end + 1])
     result["items"] = _post_process(result.get("items", []))
+    return text, result
+
+
+def _reconcile(result: dict) -> dict | None:
+    """Compare parsed items with the receipt's own SUBTOTAL and items-sold count.
+
+    Returns None when the receipt didn't show both, else the numbers plus an error score
+    (0 = items match the receipt exactly).
+    """
+    try:
+        subtotal = float(str(result.get("subtotal", "")).replace("$", "").replace(",", ""))
+        items_sold = int(str(result.get("items_sold", "")).strip())
+    except ValueError:
+        return None
+    got_sum = round(sum(float(i["price"]) for i in result["items"] if i.get("price")), 2)
+    got_count = sum(int(i.get("qty") or 1) for i in result["items"])
+    return {"got_sum": f"{got_sum:.2f}", "got_count": got_count,
+            "subtotal": f"{subtotal:.2f}", "items_sold": items_sold,
+            "error": abs(got_sum - subtotal) + abs(got_count - items_sold)}
+
+
+def _extract(images: list) -> dict:
+    """Parse the receipt images, then self-check against the printed subtotal and item count.
+
+    If the items don't add up, ask the model once more with the discrepancy spelled out
+    (Sonnet tends to collapse runs of identical lines, e.g. 4x the same item listed as 3).
+    """
+    content = [{"image": {"format": "jpeg", "source": {"bytes": img}}} for img in images]
+    messages = [{"role": "user", "content": content + [{"text": EXTRACTION_PROMPT}]}]
+    text, result = _converse(messages)
+    check = _reconcile(result)
+    if check and check["error"] > 0.005:
+        messages += [{"role": "assistant", "content": [{"text": text}]},
+                     {"role": "user", "content": [{"text": _RECHECK_PROMPT.format(**check)}]}]
+        try:
+            _, retry = _converse(messages)
+            retry_check = _reconcile(retry)
+            if retry_check and retry_check["error"] < check["error"]:
+                result, check = retry, retry_check
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Receipt recheck failed: {e}")
+    result["verified"] = bool(check) and check["error"] <= 0.005
+    if check and not result["verified"]:
+        logging.getLogger(__name__).warning(f"Receipt does not reconcile after recheck: {check}")
     return result
 
 
@@ -113,8 +162,12 @@ def _post_process(items: list) -> list:
         clean_price = price_str.rstrip("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ @#*")
         is_tpd = "TPD/" in name.upper()
         is_negative = clean_price.endswith("-")
+        # Costco discount lines read "/ <item#>" pointing at the line above. Models sometimes drop
+        # the trailing "-", so a line that is only a reference to the previous item is a discount too.
+        ref = re.fullmatch(r"(?:TPD)?\s*/?\s*(\d{4,8})", name.strip(), re.IGNORECASE)
+        refs_prev = bool(ref and merged and ref.group(1) == merged[-1].get("item_number"))
 
-        if (is_tpd or is_negative) and merged:
+        if (is_tpd or is_negative or refs_prev) and merged:
             prev = merged[-1]
             try:
                 discount = float(clean_price.replace("-", ""))
