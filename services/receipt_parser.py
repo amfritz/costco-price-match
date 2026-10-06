@@ -1,17 +1,30 @@
 import boto3
+import io
 import json
+import logging
 import re
 import os
 
-_bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
-MODEL_LITE = "us.amazon.nova-2-lite-v1:0"
-MODEL_PREMIER = "us.amazon.nova-2-lite-v1:0"
+import fitz
+from botocore.config import Config
+from PIL import Image, ImageOps
+
+_bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"),
+                        config=Config(read_timeout=120))
+# Chosen by experiments/parse_bench.py: Sonnet 4.6 was the only model to get every price,
+# date and TPD right on the benchmark receipts (Nova 2 Lite misread digits, Haiku skipped TPDs).
+MODEL_ID = "us.anthropic.claude-sonnet-4-6"
+# Bedrock rejects images over 8000px or 3.75MB; 3000px keeps receipt text sharp and well under both.
+_MAX_EDGE = 3000
+_MAX_PDF_PAGES = 20  # Converse accepts at most 20 images per request
 
 EXTRACTION_PROMPT = """Extract all lines from this Costco receipt as items.
 Return ONLY valid JSON with this exact structure, no other text:
 {
   "store": "store location or number",
   "receipt_date": "YYYY-MM-DD",
+  "subtotal": "123.45",
+  "items_sold": "17",
   "items": [
     {"name": "ITEM NAME", "price": "12.99", "qty": "1", "item_number": "1234567"}
   ]
@@ -25,27 +38,12 @@ Rules:
 - Do NOT merge or combine any lines
 - Do NOT skip any lines
 - Ignore tax lines, subtotals, totals, payment lines
-- receipt_date should be extracted from the receipt date field"""
+- receipt_date should be extracted from the receipt date field
+- subtotal = the SUBTOTAL amount; items_sold = the "TOTAL NUMBER OF ITEMS SOLD" / "Items Sold" count. Empty string if not shown.
+- The same item can appear on several consecutive identical lines; each one is a separate purchase and must be listed"""
 
-_ITEMS_PROMPT = (
-    "List ONLY the item numbers and names from the LEFT side of this Costco receipt, top to bottom.\n"
-    "Format: ITEM_NUMBER | NAME\n"
-    "Include TPD/ lines. Skip membership, tax, subtotal, total. One per line. No prices."
-)
-
-_PRICES_PROMPT = (
-    "Count and list EVERY dollar amount on the RIGHT side of this Costco receipt, "
-    "from the FIRST item to the LAST item BEFORE subtotal.\n"
-    "One price per line. Include minus signs for discounts.\n"
-    "Do NOT skip any price. Do NOT include subtotal, tax, or total.\n"
-    "There should be exactly one price for each item line on the receipt.\n"
-    "List ONLY the number (e.g. 39.99 or 10.00-), nothing else."
-)
-
-_META_PROMPT = (
-    "What is the store name/number and receipt date on this Costco receipt? "
-    "Return ONLY JSON: {\"store\":\"\",\"receipt_date\":\"YYYY-MM-DD\"}"
-)
+_RECHECK_PROMPT = """Your items do not reconcile with the receipt: they add up to ${got_sum} across {got_count} items, but the receipt shows SUBTOTAL ${subtotal} and {items_sold} items sold.
+Re-read the receipt line by line, top to bottom. Common causes: a repeated identical line was listed once, a line was skipped, a digit was misread, or a discount line ("/ 1234567" with a price ending in "-") was given without its minus sign. Return the complete corrected JSON in the same format."""
 
 _NOISE_PATTERNS = re.compile(
     r"^(AGE\s*VERIFIED|DEPOSIT|L\d+\s*MEMBER|N\d+\s*MEMBER|\d+\s*@\s*[\d.]+)",
@@ -53,73 +51,84 @@ _NOISE_PATTERNS = re.compile(
 )
 
 
-def _call_model(content, prompt, model_id):
-    resp = _bedrock.converse(
-        modelId=model_id,
-        messages=[{"role": "user", "content": content + [{"text": prompt}]}],
-        inferenceConfig={"maxTokens": 4096, "temperature": 0},
+def _prepare_image(img_bytes: bytes) -> bytes:
+    """Return an upright, downscaled JPEG.
+
+    Phone photos are stored sideways with an EXIF orientation tag; viewers rotate them but
+    Bedrock sees the raw pixels, which made parsing accuracy collapse (~15% vs ~98% upright).
+    """
+    im = ImageOps.exif_transpose(Image.open(io.BytesIO(img_bytes))).convert("RGB")
+    im.thumbnail((_MAX_EDGE, _MAX_EDGE))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=90)
+    return buf.getvalue()
+
+
+def _pdf_to_images(pdf_bytes: bytes) -> list:
+    """Render each PDF page to a JPEG (scanned receipts have no text layer to read)."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    images = []
+    for page in list(doc)[:_MAX_PDF_PAGES]:
+        zoom = min(_MAX_EDGE / max(page.rect.width, page.rect.height), 300 / 72)
+        images.append(page.get_pixmap(matrix=fitz.Matrix(zoom, zoom)).tobytes("jpeg", jpg_quality=90))
+    doc.close()
+    return images
+
+
+def _converse(messages: list) -> tuple:
+    response = _bedrock.converse(
+        modelId=MODEL_ID, messages=messages,
+        inferenceConfig={"maxTokens": 8192, "temperature": 0},
     )
-    return resp["output"]["message"]["content"][0]["text"]
+    text = "".join(c.get("text", "") for c in response["output"]["message"]["content"])
+    start, end = text.find("{"), text.rfind("}")
+    result = json.loads(text[start:end + 1])
+    result["items"] = _post_process(result.get("items", []))
+    return text, result
 
 
-def _parse_premier_image(img_bytes: bytes, fmt: str = "png") -> dict:
-    """Three-call image approach: extract items, prices, and meta separately, then zip."""
-    img_content = [{"image": {"format": fmt, "source": {"bytes": img_bytes}}}]
+def _reconcile(result: dict) -> dict | None:
+    """Compare parsed items with the receipt's own SUBTOTAL and items-sold count.
 
-    # Three parallel-safe calls
-    items_raw = _call_model(img_content, _ITEMS_PROMPT, MODEL_PREMIER)
-    prices_raw = _call_model(img_content, _PRICES_PROMPT, MODEL_PREMIER)
-    meta_raw = _call_model(img_content, _META_PROMPT, MODEL_PREMIER)
-
-    # Parse items
-    items = []
-    for line in items_raw.strip().split("\n"):
-        line = line.strip().strip("|").strip()
-        if not line or line.startswith("ITEM") or line.startswith("---"):
-            continue
-        parts = line.split("|")
-        if len(parts) >= 2:
-            items.append({"item_number": parts[0].strip(), "name": parts[1].strip()})
-        else:
-            m = re.match(r"^(\d{4,8})?\s*(.*)", line)
-            if m:
-                items.append({"item_number": m.group(1) or "", "name": m.group(2).strip()})
-
-    # Parse prices
-    prices = []
-    for line in prices_raw.strip().split("\n"):
-        m = re.match(r"^[\d.]+[-]?", line.strip())
-        if m:
-            prices.append(m.group(0))
-
-    # Zip items with prices
-    result_items = []
-    for i, item in enumerate(items):
-        price = prices[i] if i < len(prices) else "0"
-        result_items.append({
-            "name": item["name"],
-            "price": price,
-            "qty": "1",
-            "item_number": item["item_number"],
-        })
-
-    # Parse metadata
-    meta = {"store": "", "receipt_date": ""}
+    Returns None when the receipt didn't show both, else the numbers plus an error score
+    (0 = items match the receipt exactly).
+    """
     try:
-        mt = meta_raw
-        if "```" in mt:
-            mt = mt.split("```")[1]
-            if mt.startswith("json"):
-                mt = mt[4:]
-        meta = json.loads(mt.strip())
-    except Exception:
-        pass
+        subtotal = float(str(result.get("subtotal", "")).replace("$", "").replace(",", ""))
+        items_sold = int(str(result.get("items_sold", "")).strip())
+    except ValueError:
+        return None
+    got_sum = round(sum(float(i["price"]) for i in result["items"] if i.get("price")), 2)
+    got_count = sum(int(i.get("qty") or 1) for i in result["items"])
+    return {"got_sum": f"{got_sum:.2f}", "got_count": got_count,
+            "subtotal": f"{subtotal:.2f}", "items_sold": items_sold,
+            "error": abs(got_sum - subtotal) + abs(got_count - items_sold)}
 
-    return {
-        "store": meta.get("store", ""),
-        "receipt_date": meta.get("receipt_date", ""),
-        "items": result_items,
-    }
+
+def _extract(images: list) -> dict:
+    """Parse the receipt images, then self-check against the printed subtotal and item count.
+
+    If the items don't add up, ask the model once more with the discrepancy spelled out
+    (Sonnet tends to collapse runs of identical lines, e.g. 4x the same item listed as 3).
+    """
+    content = [{"image": {"format": "jpeg", "source": {"bytes": img}}} for img in images]
+    messages = [{"role": "user", "content": content + [{"text": EXTRACTION_PROMPT}]}]
+    text, result = _converse(messages)
+    check = _reconcile(result)
+    if check and check["error"] > 0.005:
+        messages += [{"role": "assistant", "content": [{"text": text}]},
+                     {"role": "user", "content": [{"text": _RECHECK_PROMPT.format(**check)}]}]
+        try:
+            _, retry = _converse(messages)
+            retry_check = _reconcile(retry)
+            if retry_check and retry_check["error"] < check["error"]:
+                result, check = retry, retry_check
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Receipt recheck failed: {e}")
+    result["verified"] = bool(check) and check["error"] <= 0.005
+    if check and not result["verified"]:
+        logging.getLogger(__name__).warning(f"Receipt does not reconcile after recheck: {check}")
+    return result
 
 
 def _post_process(items: list) -> list:
@@ -153,8 +162,12 @@ def _post_process(items: list) -> list:
         clean_price = price_str.rstrip("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ @#*")
         is_tpd = "TPD/" in name.upper()
         is_negative = clean_price.endswith("-")
+        # Costco discount lines read "/ <item#>" pointing at the line above. Models sometimes drop
+        # the trailing "-", so a line that is only a reference to the previous item is a discount too.
+        ref = re.fullmatch(r"(?:TPD)?\s*/?\s*(\d{4,8})", name.strip(), re.IGNORECASE)
+        refs_prev = bool(ref and merged and ref.group(1) == merged[-1].get("item_number"))
 
-        if (is_tpd or is_negative) and merged:
+        if (is_tpd or is_negative or refs_prev) and merged:
             prev = merged[-1]
             try:
                 discount = float(clean_price.replace("-", ""))
@@ -200,64 +213,11 @@ def _post_process(items: list) -> list:
     return merged
 
 
-def parse_receipt_image(img_bytes: bytes, fmt: str = "png", model: str = "lite") -> dict:
-    """Parse receipt from an image. Lite=single-call, Premier=three-call accuracy path."""
-    if model == "premier":
-        result = _parse_premier_image(img_bytes, fmt)
-        result["items"] = _post_process(result.get("items", []))
-        return result
-    response = _bedrock.converse(
-        modelId=MODEL_LITE,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"image": {"format": fmt, "source": {"bytes": img_bytes}}},
-                {"text": EXTRACTION_PROMPT},
-            ],
-        }],
-        inferenceConfig={"maxTokens": 4096, "temperature": 0},
-    )
-    text = response["output"]["message"]["content"][0]["text"]
-    if "```" in text:
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    result = json.loads(text.strip())
-    result["items"] = _post_process(result.get("items", []))
-    return result
+def parse_receipt_image(img_bytes: bytes) -> dict:
+    """Parse a receipt photo (JPG/PNG/WebP/GIF)."""
+    return _extract([_prepare_image(img_bytes)])
 
 
-def parse_receipt_pdf(pdf_bytes: bytes, model: str = "lite") -> dict:
-    """Parse receipt PDF. Lite=fast single-call, Premier=three-call image approach."""
-    if model == "premier":
-        import fitz
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        # Try 300 DPI first, fall back to 150 if image is too large (>20MB)
-        pix = doc[0].get_pixmap(dpi=300)
-        img_bytes = pix.tobytes("png")
-        if len(img_bytes) > 20 * 1024 * 1024:
-            pix = doc[0].get_pixmap(dpi=150)
-            img_bytes = pix.tobytes("png")
-        doc.close()
-        result = _parse_premier_image(img_bytes, "png")
-    else:
-        response = _bedrock.converse(
-            modelId=MODEL_LITE,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"document": {"format": "pdf", "name": "receipt", "source": {"bytes": pdf_bytes}}},
-                    {"text": EXTRACTION_PROMPT},
-                ],
-            }],
-            inferenceConfig={"maxTokens": 4096, "temperature": 0},
-        )
-        text = response["output"]["message"]["content"][0]["text"]
-        if "```" in text:
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        result = json.loads(text.strip())
-
-    result["items"] = _post_process(result.get("items", []))
-    return result
+def parse_receipt_pdf(pdf_bytes: bytes) -> dict:
+    """Parse a receipt PDF by rendering its pages to images."""
+    return _extract(_pdf_to_images(pdf_bytes))

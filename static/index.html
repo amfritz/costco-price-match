@@ -228,7 +228,7 @@ tr.item-row.selected{background:#d4f5f0;border-left:3px solid var(--teal)}
     <h2>🧾 Receipts</h2>
     <div class="btn-row">
       <button class="btn btn-ghost icon-btn" onclick="loadReceipts()" title="Refresh list">↻</button>
-      <button class="btn btn-danger" onclick="clearReceipts()" title="Delete all receipts">🗑️</button>
+      <button class="btn btn-danger" onclick="clearReceipts()" title="Delete expired receipts">🗑️</button>
     </div>
   </div>
   <div id="receiptsArea"></div>
@@ -347,20 +347,10 @@ function showLoginUI() {
         <div id="auth-form">
           <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:15px;font-family:DM Sans,sans-serif">
           <button onclick="doRequestOtp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Send Code</button>
-          <p style="text-align:center;color:var(--muted);font-size:14px">No account? <a href="#" onclick="showSignUp();return false" style="color:var(--pink);font-weight:700">Sign Up</a></p>
         </div>
       </div>
     </div>`;
   document.body.appendChild(d);
-}
-
-function showSignUp() {
-  document.getElementById('auth-subtitle').textContent = 'Create your account';
-  document.getElementById('auth-error').style.display = 'none';
-  document.getElementById('auth-form').innerHTML = `
-    <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:15px;font-family:DM Sans,sans-serif">
-    <button onclick="doSignUp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Sign Up</button>
-    <p style="text-align:center;color:var(--muted);font-size:14px">Have an account? <a href="#" onclick="showSignIn();return false" style="color:var(--pink);font-weight:700">Sign In</a></p>`;
 }
 
 function showSignIn() {
@@ -368,8 +358,7 @@ function showSignIn() {
   document.getElementById('auth-error').style.display = 'none';
   document.getElementById('auth-form').innerHTML = `
     <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:15px;font-family:DM Sans,sans-serif">
-    <button onclick="doRequestOtp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Send Code</button>
-    <p style="text-align:center;color:var(--muted);font-size:14px">No account? <a href="#" onclick="showSignUp();return false" style="color:var(--pink);font-weight:700">Sign Up</a></p>`;
+    <button onclick="doRequestOtp()" class="btn btn-primary" style="width:100%;padding:12px;margin-bottom:12px;font-size:15px">Send Code</button>`;
 }
 
 function showOtpInput(email) {
@@ -382,51 +371,10 @@ function showOtpInput(email) {
   document.getElementById('auth-code').focus();
 }
 
-function showConfirm(email) {
-  document.getElementById('auth-subtitle').textContent = 'Check your email for a verification code';
-  document.getElementById('auth-error').style.display = 'none';
-  document.getElementById('auth-form').innerHTML = `
-    <input id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Verification code" maxlength="8" style="width:100%;padding:12px;margin-bottom:16px;border:2px solid var(--border);border-radius:12px;box-sizing:border-box;font-size:20px;font-family:DM Sans,sans-serif;text-align:center;letter-spacing:6px">
-    <button onclick="doConfirm('${email}')" class="btn btn-primary" style="width:100%;padding:12px;font-size:15px">Confirm & Sign In</button>`;
-  document.getElementById('auth-code').focus();
-}
-
 function authError(msg) {
   const el = document.getElementById('auth-error');
   el.textContent = msg;
   el.style.display = 'block';
-}
-
-async function doSignUp() {
-  const email = document.getElementById('auth-email').value;
-  if (!email) return authError('Email is required');
-  // Generate a random password (user never sees this — sign-in is OTP only)
-  const rnd = crypto.getRandomValues(new Uint8Array(20));
-  const randomPass = 'P!' + Array.from(rnd, b => b.toString(36)).join('').slice(0, 18) + 'aA1';
-  try {
-    await cognitoApi('SignUp', {
-      ClientId: CONFIG.COGNITO_CLIENT_ID,
-      Username: email,
-      Password: randomPass,
-      UserAttributes: [{ Name: 'email', Value: email }],
-    });
-    showConfirm(email);
-  } catch(e) { authError(e.message); }
-}
-
-async function doConfirm(email) {
-  const code = document.getElementById('auth-code').value;
-  if (!code) return authError('Enter the verification code');
-  try {
-    await cognitoApi('ConfirmSignUp', {
-      ClientId: CONFIG.COGNITO_CLIENT_ID,
-      Username: email,
-      ConfirmationCode: code,
-    });
-    // Account confirmed — now sign in via OTP
-    document.getElementById('auth-subtitle').textContent = 'Account confirmed! Sending sign-in code...';
-    doRequestOtp(email);
-  } catch(e) { authError(e.message); }
 }
 
 async function doRequestOtp(emailOverride) {
@@ -556,6 +504,26 @@ function handleCameraCapture(input) {
   }
 }
 
+// Lambda caps request payloads at 6 MB (base64-encoded, so ~4.4 MB of file) and API
+// Gateway rejects >10 MB, so full-size phone photos never reach the parser. Mirror the
+// server's own prep (receipt_parser._prepare_image: 3000px long edge, JPEG q90) in the
+// browser -- no accuracy is lost, and the browser applies EXIF rotation while drawing.
+const UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
+async function shrinkImage(file) {
+  if (!file.type.startsWith('image/') || file.size <= UPLOAD_MAX_BYTES) return file;
+  const bmp = await createImageBitmap(file, {imageOrientation: 'from-image'});
+  const scale = Math.min(1, 3000 / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bmp.width * scale); canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  for (const q of [0.9, 0.8, 0.7]) {
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', q));
+    if (blob.size <= UPLOAD_MAX_BYTES) return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', {type: 'image/jpeg'});
+  }
+  throw new Error('Photo too large even after resizing');
+}
+
 // Upload multiple files sequentially
 async function uploadReceipts() {
   const files = $('pdfFile').files;
@@ -567,8 +535,10 @@ async function uploadReceipts() {
     const st = document.getElementById('ufs'+i);
     st.textContent = '⏳ Parsing...'; st.style.color = 'var(--blue)';
     bar.style.width = '30%';
-    const fd = new FormData(); fd.append('file', files[i]);
     try {
+      const file = await shrinkImage(files[i]);
+      if (file.size > UPLOAD_MAX_BYTES) throw new Error(`File too large (${(file.size/1048576).toFixed(1)} MB, max 4 MB)`);
+      const fd = new FormData(); fd.append('file', file);
       const r = await apiFetch('/api/upload', {method:'POST', body:fd});
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail);
@@ -619,7 +589,7 @@ async function loadReceipts() {
         <div class="receipt-header" onclick="toggleReceipt(this.closest('.receipt-card'))">
           <span class="receipt-title">📋 ${rc.receipt_date || '?'} — ${store}${isEligible(rc.receipt_date) ? '' : ' <span style="background:#fce8eb;color:#c5221f;padding:1px 8px;border-radius:4px;font-size:.68em;font-weight:600;margin-left:6px">Past 30 days</span>'} <button class="edit-btn" onclick="event.stopPropagation();editReceipt('${rc.receipt_id}','${(rc.receipt_date||'').replace(/'/g,"\\'")}','${(rc.store||'').replace(/'/g,"\\'")}')" title="Edit date/store">✏️</button></span>
           <div class="receipt-stats">
-            <button class="btn icon-btn" onclick="event.stopPropagation();reparseReceipt('${rc.receipt_id}',this)" title="Reparse with Premier AI">🔄</button>
+            <button class="btn icon-btn" onclick="event.stopPropagation();reparseReceipt('${rc.receipt_id}',this)" title="Reparse receipt">🔄</button>
             <button class="btn icon-btn" onclick="event.stopPropagation();openPdf('${rc.receipt_id}')" title="View receipt">📎</button>
             <button class="btn icon-btn icon-btn-del" style="color:var(--red)" onclick="event.stopPropagation();deleteReceipt('${rc.receipt_id}')" title="Delete this receipt">✕</button>
             <div class="receipt-stat"><div class="receipt-stat-val">${items.length}</div><div class="receipt-stat-lbl">Items</div></div>
@@ -757,7 +727,7 @@ async function deleteReceipt(rid) {
 }
 
 async function clearReceipts() {
-  if (!confirm('Delete all receipts?')) return;
+  if (!confirm('Delete expired receipts (older than 30 days)? Newer receipts are kept.')) return;
   await apiFetch('/api/receipts', {method:'DELETE'});
   loadReceipts();
 }

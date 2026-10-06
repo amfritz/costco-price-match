@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Costco Receipt Scanner & Price Match Agent — AI-powered tool that scans Costco receipts (PDF or camera photo), cross-references purchases against active US deals from 5 sources, and identifies price adjustment opportunities. Includes a web UI, native iOS app, and a weekly automated email agent.
+Costco Receipt Scanner & Price Match Agent — AI-powered tool that scans Costco receipts (PDF or camera photo), cross-references purchases against active US deals from 5 sources, and identifies price adjustment opportunities. Includes a web UI and a weekly automated email agent.
 
 BYOI (Bring Your Own Infrastructure) model: users deploy CDK to their own AWS account. No SaaS backend.
 
@@ -29,13 +29,8 @@ After AgentCore is deployed, recipients and Resend API key live in SSM — no re
 - `/costco-scanner/resend-api-key` (SecureString) — Resend API key
 - `/costco-scanner/notify-emails` (String) — comma-separated recipient list
 
-> **Before the next full deploy of `CostcoScannerAmplify`:** the custom domain
-> (`costco.dunkinspeeps.com`) was created by hand in the console and is now declared in
-> `infra/lib/amplify-stack.ts`, but CloudFormation does not track it yet — deploying as-is
-> fails with a CREATE conflict on the existing domain association. Adopt it first via
-> `npx cdk import CostcoScannerAmplify`. The resource ARN and the reason the apex is *not*
-> mapped (dunkinspeeps.com is a separate Railway site; DNS is on Cloudflare) are in the
-> comment at the `addDomain` call. `./deploy.sh --static-only` is unaffected.
+### Users
+Sign-up is disabled (Cognito `AllowAdminCreateUserOnly`, no Sign Up UI) because every user sees every receipt. Add or remove users with `aws cognito-idp admin-create-user` / `admin-delete-user` — the README "Users" section has the exact commands. Users sign in with an email OTP; there are no passwords. The notify-emails list is unrelated to who can log in.
 
 ### Deploy static files only (frontend changes)
 ```bash
@@ -66,20 +61,19 @@ No automated test suite exists.
 
 ### Backend services (`services/`)
 - **`db.py`** — DynamoDB (CostcoReceipts, CostcoPriceDrops tables) + S3 (receipt files with presigned URLs). Deduplicates receipts by file hash.
-- **`receipt_parser.py`** — Parses receipts via Bedrock Nova. Three modes: Lite (single-call PDF), Premier (converts to PNG, 3 parallel calls for accuracy), and direct image parsing (JPG/PNG from camera). Post-processes TPD merging, item number extraction with OCR correction (O→0, B→8).
+- **`receipt_parser.py`** — Parses receipts with Claude Sonnet 4.6 on Bedrock in a single Converse call. Photos are EXIF-rotated upright and downscaled first (phone photos are stored sideways; sending raw pixels wrecked accuracy); PDFs are rendered to page images. Post-processes TPD merging, item number extraction with OCR correction (O→0, B→8). Model choice is backed by `experiments/parse_bench.py`.
 - **`price_scanner.py`** — Scrapes 5 US deal sources (Reddit r/Costco, Reddit r/CostcoDeals, KCL Costco Deals, KCL Coupon Book, CostcoFan). Returns `(deals, source_results)` tuple for per-source observability. Caches per calendar day, deduplicates by (item_name, promo_end).
 - **`analyzer.py`** — Strands Agents framework with Nova 2 Lite. Tool-based matching: exact item number → partial item number → keyword overlap. Streams results via SSE.
 
 ### Infrastructure (`infra/`, AWS CDK TypeScript)
 Three stacks: **CommonStack** (DynamoDB, S3, ECR), **AmplifyStack** (Cognito with email OTP, Lambda, API Gateway, Amplify hosting), **AgentCoreStack** (runtime, EventBridge scheduler, SES).
 
-### Frontends
+### Frontend
 - **Web** (`static/index.html`) — Single HTML file, SPA with passwordless email OTP auth (Cognito USER_AUTH flow, no SDK dependency). Config injected at deploy via `static/config.js`. Mobile-responsive with camera capture for receipt photos.
-- **iOS** (`ios/CostcoScanner/`) — Native SwiftUI, zero dependencies, pure URLSession + Cognito REST API. BYOI flow: paste API URL → auto-fetches credentials from `/api/config`.
 
 ### Key patterns
-- `/api/config` is the only unauthenticated endpoint (returns Cognito pool info for BYOI)
-- `/api/upload` accepts PDF, JPG, PNG, WebP, GIF — images are sent directly to Bedrock Nova
+- Every API route requires a Cognito JWT except CORS preflight (OPTIONS). The iOS app this was forked with was removed along with its unauthenticated `/api/config` credentials endpoint — don't reintroduce one.
+- `/api/upload` accepts PDF, JPG, PNG, WebP, GIF — the original file is stored in S3 under `receipts/<id>.pdf` even when it is an image, so detect type by magic bytes
 - `/api/analyze` uses Server-Sent Events for streaming agent output
 - Receipt files stored in S3 with 7-day presigned URLs
 - Price scanner uses random User-Agent rotation and 1-second rate limiting between sources

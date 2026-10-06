@@ -16,30 +16,6 @@ def root():
     return FileResponse("static/index.html")
 
 
-@app.get("/api/config")
-def get_config():
-    """Unauthenticated endpoint returning pool config + credentials for iOS BYOI flow."""
-    import os, json, boto3
-    region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
-    result = {
-        "user_pool_id": os.environ.get("USER_POOL_ID", ""),
-        "user_pool_client_id": os.environ.get("USER_POOL_CLIENT_ID", ""),
-        "region": region,
-        "username": "",
-        "password": "",
-    }
-    secret_arn = os.environ.get("APP_SECRET_ARN", "")
-    if secret_arn:
-        try:
-            sm = boto3.client("secretsmanager", region_name=region)
-            secret = json.loads(sm.get_secret_value(SecretId=secret_arn)["SecretString"])
-            result["username"] = secret.get("username", "")
-            result["password"] = secret.get("password", "")
-        except Exception as e:
-            print(f"Failed to read secret: {e}")
-    return result
-
-
 IMAGE_EXTENSIONS = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png", ".gif": "gif", ".webp": "webp"}
 
 @app.post("/api/upload")
@@ -62,7 +38,7 @@ async def upload_receipt(file: UploadFile = File(...)):
         raise HTTPException(400, "File content does not match a supported image format")
     try:
         if is_image:
-            parsed = receipt_parser.parse_receipt_image(file_bytes, IMAGE_EXTENSIONS[ext])
+            parsed = receipt_parser.parse_receipt_image(file_bytes)
         else:
             parsed = receipt_parser.parse_receipt_pdf(file_bytes)
     except Exception as e:
@@ -85,9 +61,9 @@ def list_receipts():
 
 
 @app.delete("/api/receipts")
-def clear_all_receipts():
-    db.clear_receipts()
-    return {"message": "All receipts deleted"}
+def clear_expired_receipts():
+    deleted = db.clear_expired_receipts()
+    return {"message": f"Deleted {deleted} expired receipts", "deleted": deleted}
 
 
 @app.delete("/api/receipt/{receipt_id}")
@@ -222,26 +198,14 @@ def reparse_receipt(receipt_id: str):
     if not file_bytes:
         raise HTTPException(404, "Receipt file not found in S3")
     head = file_bytes[:4]
+    if head != b'%PDF' and head[:3] != b'\xff\xd8\xff' and head not in (b'\x89PNG', b'RIFF', b'GIF8'):
+        raise HTTPException(400, "Unsupported receipt file format")
     try:
+        # Files are stored under a .pdf key even when they are photos, so detect by magic bytes.
         if head == b'%PDF':
-            parsed = receipt_parser.parse_receipt_pdf(file_bytes, model="premier")
-            model_label = "premier"
+            parsed = receipt_parser.parse_receipt_pdf(file_bytes)
         else:
-            # Image receipt (JPG/PNG/etc.) — re-run via image parser.
-            if head[:3] == b'\xff\xd8\xff':
-                fmt = "jpeg"
-            elif head == b'\x89PNG':
-                fmt = "png"
-            elif head == b'RIFF':
-                fmt = "webp"
-            elif head == b'GIF8':
-                fmt = "gif"
-            else:
-                raise HTTPException(400, "Unsupported receipt file format")
-            parsed = receipt_parser.parse_receipt_image(file_bytes, fmt, model="premier")
-            model_label = "premier"
-    except HTTPException:
-        raise
+            parsed = receipt_parser.parse_receipt_image(file_bytes)
     except Exception as e:
         import logging; logging.getLogger(__name__).error(f"Reparse error: {e}", exc_info=True)
         raise HTTPException(500, "Reparse failed. Please try again.")
@@ -251,7 +215,7 @@ def reparse_receipt(receipt_id: str):
         store=parsed.get("store", ""),
         receipt_date=parsed.get("receipt_date", ""),
     )
-    return {"items": len(parsed.get("items", [])), "model": model_label}
+    return {"items": len(parsed.get("items", [])), "model": receipt_parser.MODEL_ID}
 
 
 try:

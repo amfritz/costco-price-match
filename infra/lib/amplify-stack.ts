@@ -6,8 +6,6 @@ import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as authorizers from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as amplify from '@aws-cdk/aws-amplify-alpha';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
-import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { CommonStack } from './common-stack';
 
@@ -19,7 +17,6 @@ interface AmplifyStackProps extends cdk.StackProps {
 export class AmplifyStack extends cdk.Stack {
   public readonly userPool: cognito.UserPool;
   public readonly webAppClient: cognito.UserPoolClient;
-  public readonly iosAppClient: cognito.UserPoolClient;
   public readonly lambdaFunction: lambda.Function;
   public readonly httpApi: apigateway.HttpApi;
   public readonly amplifyApp: amplify.App;
@@ -29,10 +26,11 @@ export class AmplifyStack extends cdk.Stack {
 
     const { commonStack } = props;
 
-    // Cognito User Pool with self-signup enabled
+    // Cognito User Pool -- invite-only: self sign-up is off, add users with
+    // `aws cognito-idp admin-create-user` (they then sign in with an email code)
     this.userPool = new cognito.UserPool(this, 'UserPool', {
       userPoolName: 'costco-scanner-users',
-      selfSignUpEnabled: true,
+      selfSignUpEnabled: false,
       signInAliases: { email: true },
       autoVerify: { email: true },
       passwordPolicy: {
@@ -68,84 +66,6 @@ export class AmplifyStack extends cdk.Stack {
       'ALLOW_USER_PASSWORD_AUTH',
       'ALLOW_REFRESH_TOKEN_AUTH',
     ]);
-
-    // iOS app client
-    this.iosAppClient = this.userPool.addClient('IosAppClient', {
-      userPoolClientName: 'costco-scanner-ios',
-      generateSecret: false,
-      authFlows: {
-        userSrp: true,
-        userPassword: true,
-        custom: true,
-      },
-    });
-
-    const cfnIosClient = this.iosAppClient.node.defaultChild as cognito.CfnUserPoolClient;
-    cfnIosClient.addPropertyOverride('ExplicitAuthFlows', [
-      'ALLOW_USER_AUTH',
-      'ALLOW_USER_SRP_AUTH',
-      'ALLOW_USER_PASSWORD_AUTH',
-      'ALLOW_REFRESH_TOKEN_AUTH',
-    ]);
-
-    // App credentials in Secrets Manager (auto-generated password)
-    const defaultEmail = props.notifyEmail || 'admin@costscanner.local';
-
-    const appSecret = new secretsmanager.Secret(this, 'AppCredentials', {
-      secretName: 'costco-scanner/app-credentials',
-      generateSecretString: {
-        secretStringTemplate: JSON.stringify({ username: defaultEmail }),
-        generateStringKey: 'password',
-        passwordLength: 24,
-        excludePunctuation: false,
-      },
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
-
-    // Create default Cognito user via custom resource
-    const createUser = new cr.AwsCustomResource(this, 'CreateDefaultUser', {
-      onCreate: {
-        service: 'CognitoIdentityServiceProvider',
-        action: 'adminCreateUser',
-        parameters: {
-          UserPoolId: this.userPool.userPoolId,
-          Username: defaultEmail,
-          TemporaryPassword: appSecret.secretValueFromJson('password').unsafeUnwrap(),
-          UserAttributes: [{ Name: 'email', Value: defaultEmail }, { Name: 'email_verified', Value: 'true' }],
-          MessageAction: 'SUPPRESS',
-        },
-        physicalResourceId: cr.PhysicalResourceId.of('default-user'),
-        ignoreErrorCodesMatching: 'UsernameExistsException',
-      },
-      policy: cr.AwsCustomResourcePolicy.fromStatements([
-        new iam.PolicyStatement({
-          actions: ['cognito-idp:AdminCreateUser'],
-          resources: [this.userPool.userPoolArn],
-        }),
-      ]),
-    });
-
-    // Set permanent password
-    const setPassword = new cr.AwsCustomResource(this, 'SetDefaultPassword', {
-      onCreate: {
-        service: 'CognitoIdentityServiceProvider',
-        action: 'adminSetUserPassword',
-        parameters: {
-          UserPoolId: this.userPool.userPoolId,
-          Username: defaultEmail,
-          Password: appSecret.secretValueFromJson('password').unsafeUnwrap(),
-          Permanent: true,
-        },
-        physicalResourceId: cr.PhysicalResourceId.of('default-user-password'),
-      },
-      policy: cr.AwsCustomResourcePolicy.fromStatements([
-        new iam.PolicyStatement({
-          actions: ['cognito-idp:AdminSetUserPassword'],
-          resources: [this.userPool.userPoolArn],
-        }),
-      ]),
-    });
-    setPassword.node.addDependency(createUser);
 
     // Lambda IAM role
     const lambdaRole = new iam.Role(this, 'LambdaRole', {
@@ -238,18 +158,14 @@ export class AmplifyStack extends cdk.Stack {
         S3_BUCKET: commonStack.receiptsBucket.bucketName,
         USER_POOL_ID: this.userPool.userPoolId,
         USER_POOL_CLIENT_ID: this.webAppClient.userPoolClientId,
-        APP_SECRET_ARN: appSecret.secretArn,
       },
     });
-
-    // Grant Lambda access to Secrets Manager
-    appSecret.grantRead(this.lambdaFunction);
 
     // JWT Authorizer
     const jwtAuthorizer = new authorizers.HttpJwtAuthorizer('JwtAuthorizer', 
       `https://cognito-idp.${this.region}.amazonaws.com/${this.userPool.userPoolId}`,
       {
-        jwtAudience: [this.webAppClient.userPoolClientId, this.iosAppClient.userPoolClientId],
+        jwtAudience: [this.webAppClient.userPoolClientId],
       }
     );
 
@@ -272,13 +188,6 @@ export class AmplifyStack extends cdk.Stack {
       methods: [apigateway.HttpMethod.ANY],
       integration: lambdaIntegration,
       authorizer: jwtAuthorizer,
-    });
-
-    // Unauthenticated config endpoint for iOS BYOI flow
-    this.httpApi.addRoutes({
-      path: '/api/config',
-      methods: [apigateway.HttpMethod.GET],
-      integration: lambdaIntegration,
     });
 
     // OPTIONS route without auth (CORS preflight)
@@ -311,23 +220,15 @@ export class AmplifyStack extends cdk.Stack {
     //   - enableAutoSubdomain stays off. It requires a Route53 zone in this
     //     account, and would create subdomains this app does not own.
     //
-    // WARNING: this documents infrastructure that already exists. The domain
-    // association was created by hand in the console, so CloudFormation does not
-    // track it. Deploying this stack as-is will FAIL -- CFN tries to CREATE an
-    // association that is already present. Before the next deploy, adopt the
-    // existing resource rather than recreating it:
-    //   npx cdk import CostcoScannerAmplify
-    // identifying it by ARN:
-    //   arn:aws:amplify:us-east-1:521355009421:apps/d18mduqqiwv5pv/domains/dunkinspeeps.com
-    // Confirm `cdk import` supports AWS::Amplify::Domain before relying on it.
-    // The fallback -- deleting the console-created association so CFN can
-    // recreate it -- drops the live certificate and re-triggers domain
-    // verification, taking costco.dunkinspeeps.com offline until DNS revalidates.
-    this.amplifyApp.addDomain('Domain', {
+    // RETAIN: the association was created by hand in the console and adopted
+    // with `cdk import` (2026-10-05). Deleting it would drop the live cert and
+    // take the site offline until DNS revalidates.
+    const domain = this.amplifyApp.addDomain('Domain', {
       domainName: 'dunkinspeeps.com',
       enableAutoSubdomain: false,
       subDomains: [{ branch: mainBranch, prefix: 'costco' }],
     });
+    domain.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
 
     // Outputs
     new cdk.CfnOutput(this, 'UserPoolId', {
@@ -338,11 +239,6 @@ export class AmplifyStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'WebAppClientId', {
       value: this.webAppClient.userPoolClientId,
       exportName: `${this.stackName}-WebAppClientId`,
-    });
-
-    new cdk.CfnOutput(this, 'IosAppClientId', {
-      value: this.iosAppClient.userPoolClientId,
-      exportName: `${this.stackName}-IosAppClientId`,
     });
 
     new cdk.CfnOutput(this, 'ApiUrl', {
