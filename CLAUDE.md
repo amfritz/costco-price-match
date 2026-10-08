@@ -29,6 +29,11 @@ After AgentCore is deployed, recipients and Resend API key live in SSM — no re
 - `/costco-scanner/resend-api-key` (SecureString) — Resend API key
 - `/costco-scanner/notify-emails` (String) — comma-separated recipient list
 
+Receipt parsing uses a 30-day Anthropic API key, created by hand in SSM (not by CDK) and rotated by overwriting it — no redeploy; the Lambda re-reads SSM when a key is rejected:
+- `/costco-scanner/anthropic-api-key` (SecureString) — Anthropic API key
+
+The web UI shows a red banner when parsing is down (key rejected, out of credit, API outage) and an amber one once the parameter is 25+ days old (`GET /api/parser-status`).
+
 ### Users
 Sign-up is disabled (Cognito `AllowAdminCreateUserOnly`, no Sign Up UI) because every user sees every receipt. Add or remove users with `aws cognito-idp admin-create-user` / `admin-delete-user` — the README "Users" section has the exact commands. Users sign in with an email OTP; there are no passwords. The notify-emails list is unrelated to who can log in.
 
@@ -61,7 +66,7 @@ No automated test suite exists.
 
 ### Backend services (`services/`)
 - **`db.py`** — DynamoDB (CostcoReceipts, CostcoPriceDrops tables) + S3 (receipt files with presigned URLs). Deduplicates receipts by file hash.
-- **`receipt_parser.py`** — Parses receipts with Claude Sonnet 4.6 on Bedrock in a single Converse call. Photos are EXIF-rotated upright and downscaled first (phone photos are stored sideways; sending raw pixels wrecked accuracy); PDFs are rendered to page images. Post-processes TPD merging, item number extraction with OCR correction (O→0, B→8). Model choice is backed by `experiments/parse_bench.py`.
+- **`receipt_parser.py`** — Parses receipts with Claude Haiku 5.5 on the Anthropic API (not Bedrock — the 5.x models aren't enabled there for this account), then self-checks the items against the receipt's printed subtotal and item count, asking once more if they disagree. API failures raise `ParserUnavailable` with a UI-ready message (503). Photos are EXIF-rotated upright and downscaled first (phone photos are stored sideways; sending raw pixels wrecked accuracy); PDFs are rendered to page images. Post-processes TPD merging, item number extraction with OCR correction (O→0, B→8). Model choice is backed by `experiments/parse_bench.py`.
 - **`price_scanner.py`** — Scrapes 5 US deal sources (Reddit r/Costco, Reddit r/CostcoDeals, KCL Costco Deals, KCL Coupon Book, CostcoFan). Returns `(deals, source_results)` tuple for per-source observability. Caches per calendar day, deduplicates by (item_name, promo_end).
 - **`analyzer.py`** — Strands Agents framework with Nova 2 Lite. Tool-based matching: exact item number → partial item number → keyword overlap. Streams results via SSE.
 

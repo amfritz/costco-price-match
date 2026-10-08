@@ -6,3 +6,18 @@ node_modules/
 __pycache__/
 .DS_Store
 *.log
+
+# agentcore.Dockerfile does `COPY . .` -- keep secrets and personal data out of the images
+.env
+.env.*
+.claude/
+.venv/
+venv/
+experiments/
+# receipt photos dropped in the repo root (member number, card digits)
+/*.jpg
+/*.jpeg
+/*.png
+/*.heic
+screenshots/
+diagrams/

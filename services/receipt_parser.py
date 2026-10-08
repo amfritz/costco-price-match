@@ -1,22 +1,37 @@
-import boto3
+import base64
 import io
 import json
 import logging
 import re
 import os
+import threading
+import time
+from datetime import datetime, timezone
 
+import anthropic
+import boto3
 import fitz
-from botocore.config import Config
 from PIL import Image, ImageOps
 
-_bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"),
-                        config=Config(read_timeout=120))
-# Chosen by experiments/parse_bench.py: Sonnet 4.6 was the only model to get every price,
-# date and TPD right on the benchmark receipts (Nova 2 Lite misread digits, Haiku skipped TPDs).
-MODEL_ID = "us.anthropic.claude-sonnet-4-6"
-# Bedrock rejects images over 8000px or 3.75MB; 3000px keeps receipt text sharp and well under both.
+log = logging.getLogger(__name__)
+
+# Chosen by experiments/parse_bench.py (2026-10-07): Haiku 5.5 parsed every benchmark receipt
+# perfectly (15/15 runs, no rechecks needed) at ~0.13c a receipt; Sonnet 4.6 on Bedrock managed
+# 13/15 at ~2.6c. Called on the Anthropic API because Bedrock has not enabled 5.x for this account.
+MODEL_ID = "claude-haiku-5-5"
+# 30-day key kept in SSM so it can be rotated without a redeploy.
+API_KEY_PARAM = os.environ.get("ANTHROPIC_KEY_PARAM", "/costco-scanner/anthropic-api-key")
+KEY_ROTATE_WARN_DAYS = 25
+# 3000px keeps receipt text sharp and well under the API's 8000px / 5MB per-image limits.
 _MAX_EDGE = 3000
-_MAX_PDF_PAGES = 20  # Converse accepts at most 20 images per request
+_MAX_PDF_PAGES = 20
+# API Gateway cuts requests off at 30s; give up sooner so the UI gets a readable error.
+_TIMEOUT_SECONDS = 25
+
+_ssm = boto3.client("ssm", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+_client = None
+_client_lock = threading.Lock()
+_status_ok_at = 0.0
 
 EXTRACTION_PROMPT = """Extract all lines from this Costco receipt as items.
 Return ONLY valid JSON with this exact structure, no other text:
@@ -55,7 +70,7 @@ def _prepare_image(img_bytes: bytes) -> bytes:
     """Return an upright, downscaled JPEG.
 
     Phone photos are stored sideways with an EXIF orientation tag; viewers rotate them but
-    Bedrock sees the raw pixels, which made parsing accuracy collapse (~15% vs ~98% upright).
+    the model sees the raw pixels, which made parsing accuracy collapse (~15% vs ~98% upright).
     """
     im = ImageOps.exif_transpose(Image.open(io.BytesIO(img_bytes))).convert("RGB")
     im.thumbnail((_MAX_EDGE, _MAX_EDGE))
@@ -75,16 +90,94 @@ def _pdf_to_images(pdf_bytes: bytes) -> list:
     return images
 
 
+class ParserUnavailable(Exception):
+    """Parsing can't run at all (key rejected, no credit, outage). The message is shown in the UI."""
+
+
+def _load_client(refresh: bool = False) -> anthropic.Anthropic:
+    """Anthropic client built from the SSM key, cached per Lambda container.
+
+    refresh=True re-reads SSM, so a key rotated in Parameter Store is picked up without a redeploy.
+    """
+    global _client
+    with _client_lock:
+        if _client is None or refresh:
+            try:
+                key = _ssm.get_parameter(Name=API_KEY_PARAM, WithDecryption=True)["Parameter"]["Value"]
+            except _ssm.exceptions.ParameterNotFound:
+                raise ParserUnavailable(f"Anthropic API key not found: SSM parameter {API_KEY_PARAM} does not exist.")
+            except Exception as e:
+                raise ParserUnavailable(f"Could not read the Anthropic API key from SSM ({API_KEY_PARAM}): {e}")
+            _client = anthropic.Anthropic(api_key=key.strip(), timeout=_TIMEOUT_SECONDS, max_retries=1)
+        return _client
+
+
+def _friendly(e: anthropic.APIError) -> ParserUnavailable:
+    """Turn an API failure into a message that says what to fix."""
+    if isinstance(e, anthropic.AuthenticationError):
+        msg = (f"The Anthropic API key was rejected (expired, revoked, or mistyped). Create a new key "
+               f"and update SSM parameter {API_KEY_PARAM}.")
+    elif getattr(e, "status_code", None) == 402 or "credit balance" in str(e).lower():
+        msg = "The Anthropic account is out of credit. Add credit at console.anthropic.com."
+    elif isinstance(e, anthropic.PermissionDeniedError):
+        msg = f"The Anthropic API key is not allowed to use {MODEL_ID}."
+    elif isinstance(e, anthropic.NotFoundError):
+        msg = f"Model {MODEL_ID} is not available to this Anthropic account."
+    elif isinstance(e, (anthropic.APITimeoutError, anthropic.APIConnectionError, anthropic.RateLimitError,
+                        anthropic.InternalServerError)):
+        msg = "The Anthropic API is unavailable or overloaded right now. Try again in a few minutes."
+    else:
+        msg = f"Anthropic API error ({getattr(e, 'status_code', '?')}): {getattr(e, 'message', e)}"
+    log.error(f"Receipt parser unavailable: {msg} [{type(e).__name__}: {e}]")
+    return ParserUnavailable(msg)
+
+
+def _with_client(fn):
+    """Run fn(client); on a rejected key, re-read SSM once in case the key was rotated."""
+    for refresh in (False, True):
+        try:
+            return fn(_load_client(refresh=refresh))
+        except anthropic.AuthenticationError as e:
+            if refresh:
+                raise _friendly(e) from e
+        except anthropic.APIError as e:
+            raise _friendly(e) from e
+
+
+def _create(messages: list):
+    return _with_client(lambda c: c.messages.create(model=MODEL_ID, max_tokens=16000, messages=messages))
+
+
+def status() -> dict:
+    """Health check for the UI banner: validates the key (Models API, no tokens billed) and its age."""
+    global _status_ok_at
+    result = {"ok": True, "problem": "", "model": MODEL_ID, "key_param": API_KEY_PARAM,
+              "key_age_days": None, "rotate_soon": False}
+    try:
+        modified = _ssm.get_parameter(Name=API_KEY_PARAM)["Parameter"]["LastModifiedDate"]
+        result["key_age_days"] = (datetime.now(timezone.utc) - modified).days
+        result["rotate_soon"] = result["key_age_days"] >= KEY_ROTATE_WARN_DAYS
+    except Exception:
+        pass  # a missing or unreadable parameter is reported by _load_client below
+    if time.time() - _status_ok_at < 300:
+        return result  # key validated in the last 5 minutes
+    try:
+        _with_client(lambda c: c.models.retrieve(MODEL_ID))
+        _status_ok_at = time.time()
+    except ParserUnavailable as e:
+        result.update(ok=False, problem=str(e))
+    return result
+
+
 def _converse(messages: list) -> tuple:
-    response = _bedrock.converse(
-        modelId=MODEL_ID, messages=messages,
-        inferenceConfig={"maxTokens": 8192, "temperature": 0},
-    )
-    text = "".join(c.get("text", "") for c in response["output"]["message"]["content"])
+    response = _create(messages)
+    if response.stop_reason in ("refusal", "max_tokens"):
+        raise ValueError(f"Model stopped early: {response.stop_reason}")
+    text = "".join(b.text for b in response.content if b.type == "text")
     start, end = text.find("{"), text.rfind("}")
     result = json.loads(text[start:end + 1])
     result["items"] = _post_process(result.get("items", []))
-    return text, result
+    return response.content, result
 
 
 def _reconcile(result: dict) -> dict | None:
@@ -109,25 +202,28 @@ def _extract(images: list) -> dict:
     """Parse the receipt images, then self-check against the printed subtotal and item count.
 
     If the items don't add up, ask the model once more with the discrepancy spelled out
-    (Sonnet tends to collapse runs of identical lines, e.g. 4x the same item listed as 3).
+    (models tend to collapse runs of identical lines, e.g. 4x the same item listed as 3).
     """
-    content = [{"image": {"format": "jpeg", "source": {"bytes": img}}} for img in images]
-    messages = [{"role": "user", "content": content + [{"text": EXTRACTION_PROMPT}]}]
-    text, result = _converse(messages)
+    content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                            "data": base64.standard_b64encode(img).decode()}}
+               for img in images]
+    messages = [{"role": "user", "content": content + [{"type": "text", "text": EXTRACTION_PROMPT}]}]
+    reply, result = _converse(messages)
     check = _reconcile(result)
     if check and check["error"] > 0.005:
-        messages += [{"role": "assistant", "content": [{"text": text}]},
-                     {"role": "user", "content": [{"text": _RECHECK_PROMPT.format(**check)}]}]
+        # Replay the assistant reply unchanged (thinking blocks included).
+        messages += [{"role": "assistant", "content": reply},
+                     {"role": "user", "content": [{"type": "text", "text": _RECHECK_PROMPT.format(**check)}]}]
         try:
             _, retry = _converse(messages)
             retry_check = _reconcile(retry)
             if retry_check and retry_check["error"] < check["error"]:
                 result, check = retry, retry_check
         except Exception as e:
-            logging.getLogger(__name__).warning(f"Receipt recheck failed: {e}")
+            log.warning(f"Receipt recheck failed: {e}")
     result["verified"] = bool(check) and check["error"] <= 0.005
     if check and not result["verified"]:
-        logging.getLogger(__name__).warning(f"Receipt does not reconcile after recheck: {check}")
+        log.warning(f"Receipt does not reconcile after recheck: {check}")
     return result
 
 

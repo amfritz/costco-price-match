@@ -41,6 +41,8 @@ async def upload_receipt(file: UploadFile = File(...)):
             parsed = receipt_parser.parse_receipt_image(file_bytes)
         else:
             parsed = receipt_parser.parse_receipt_pdf(file_bytes)
+    except receipt_parser.ParserUnavailable as e:
+        raise HTTPException(503, str(e))
     except Exception as e:
         import logging; logging.getLogger(__name__).error(f"Receipt parse error: {e}", exc_info=True)
         raise HTTPException(500, "Failed to parse receipt. Please try a different file.")
@@ -53,6 +55,12 @@ async def upload_receipt(file: UploadFile = File(...)):
     # Store original file in S3 for potential reparse
     db.upload_pdf(receipt["receipt_id"], file_bytes)
     return {"receipt": receipt, "parsed_items": len(receipt["items"])}
+
+
+@app.get("/api/parser-status")
+def parser_status():
+    """Whether receipt parsing can run (Anthropic key valid, credit available) and the key's age."""
+    return receipt_parser.status()
 
 
 @app.get("/api/receipts")
@@ -206,6 +214,8 @@ def reparse_receipt(receipt_id: str):
             parsed = receipt_parser.parse_receipt_pdf(file_bytes)
         else:
             parsed = receipt_parser.parse_receipt_image(file_bytes)
+    except receipt_parser.ParserUnavailable as e:
+        raise HTTPException(503, str(e))
     except Exception as e:
         import logging; logging.getLogger(__name__).error(f"Reparse error: {e}", exc_info=True)
         raise HTTPException(500, "Reparse failed. Please try again.")

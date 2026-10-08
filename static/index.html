@@ -37,6 +37,9 @@ body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;backgroun
 .icon-btn:hover{background:#dbeafe}
 .icon-btn-del:hover{background:#fce8eb!important}
 input[type=file]{display:none}
+.parser-banner{font-size:.9em;font-weight:600;padding:12px 18px}
+.parser-banner.err{background:#fde2ec;border-color:var(--red)}
+.parser-banner.warn{background:#fff4d6;border-color:#c98a00}
 .upload-zone{border:2px dashed var(--border);border-radius:12px;padding:20px;text-align:center;cursor:pointer;transition:all .2s}
 .upload-zone:hover{border-color:var(--pink);background:#fce8f0}
 .search-input{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:.88em;background:var(--bg)}
@@ -162,6 +165,8 @@ tr.item-row.selected{background:#d4f5f0;border-left:3px solid var(--teal)}
 
 <div class="container">
 
+<div id="parserBanner" class="card parser-banner" role="alert" style="display:none"></div>
+
 <div class="card" style="padding:14px 20px">
   <h2 style="font-size:1em;margin:0 0 10px;white-space:nowrap">📄 Upload Receipts</h2>
   <div class="upload-flex" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -258,6 +263,7 @@ function initializeApp() {
     // Local mode - load data immediately
     loadReceipts();
     loadDeals();
+    checkParser();
   }
 }
 
@@ -320,6 +326,7 @@ function initializeCognito() {
       document.getElementById('logout-btn').style.display = '';
       loadReceipts();
       loadDeals();
+      checkParser();
     } else {
       // Try refresh
       refreshSession(stored).then(refreshed => {
@@ -328,6 +335,7 @@ function initializeCognito() {
           document.getElementById('logout-btn').style.display = '';
           loadReceipts();
           loadDeals();
+          checkParser();
         } else { showLoginUI(); }
       });
     }
@@ -408,6 +416,7 @@ async function doVerifyOtp(email) {
     document.getElementById('logout-btn').style.display = '';
     loadReceipts();
     loadDeals();
+    checkParser();
   } catch(e) { authError(e.message); }
 }
 
@@ -524,6 +533,27 @@ async function shrinkImage(file) {
   throw new Error('Photo too large even after resizing');
 }
 
+// Receipt parsing runs on the Anthropic API with a 30-day key from SSM. Surface a dead key,
+// exhausted credit, or an outage here instead of leaving it to a failed upload.
+function showParserBanner(kind, msg) {
+  const b = $('parserBanner');
+  if (!kind) { b.style.display = 'none'; return; }
+  b.className = 'card parser-banner ' + kind;
+  b.textContent = msg;
+  b.style.display = '';
+}
+
+async function checkParser() {
+  try {
+    const r = await apiFetch('/api/parser-status');
+    if (!r.ok) return;
+    const s = await r.json();
+    if (!s.ok) showParserBanner('err', '⚠️ Receipt parsing is down: ' + s.problem);
+    else if (s.rotate_soon) showParserBanner('warn', `🔑 The Anthropic API key was set ${s.key_age_days} days ago and 30-day keys expire soon. Create a new key and update ${s.key_param} in SSM.`);
+    else showParserBanner(null);
+  } catch(e) { /* status check is best-effort */ }
+}
+
 // Upload multiple files sequentially
 async function uploadReceipts() {
   const files = $('pdfFile').files;
@@ -541,6 +571,7 @@ async function uploadReceipts() {
       const fd = new FormData(); fd.append('file', file);
       const r = await apiFetch('/api/upload', {method:'POST', body:fd});
       const d = await r.json();
+      if (r.status === 503) showParserBanner('err', '⚠️ Receipt parsing is down: ' + d.detail);
       if (!r.ok) throw new Error(d.detail);
       bar.style.width = '100%'; bar.style.background = 'var(--green)';
       st.textContent = `✅ ${d.parsed_items} items`; st.style.color = 'var(--green)';
@@ -713,6 +744,7 @@ async function reparseReceipt(rid, btn) {
   try {
     const r = await apiFetch(`/api/reparse/${rid}`, {method:'POST'});
     const d = await r.json();
+    if (r.status === 503) showParserBanner('err', '⚠️ Receipt parsing is down: ' + d.detail);
     if (!r.ok) throw new Error(d.detail);
     btn.textContent = '✅';
     loadReceipts();

@@ -130,6 +130,17 @@ export class AmplifyStack extends cdk.Stack {
             }),
           ],
         }),
+        // Receipt parsing calls the Anthropic API with a key kept in SSM (SecureString, created by
+        // hand so it can be rotated without a deploy). The aws/ssm KMS key needs no extra grant.
+        AnthropicKeyAccess: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ['ssm:GetParameter'],
+              resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/costco-scanner/anthropic-api-key`],
+            }),
+          ],
+        }),
         NotifyAccess: new iam.PolicyDocument({
           statements: [
             new iam.PolicyStatement({

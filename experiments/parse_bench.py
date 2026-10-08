@@ -1,18 +1,26 @@
-"""Benchmark receipt parsing across Bedrock models against hand-checked ground truth.
+"""Benchmark receipt parsing across Bedrock and Anthropic API models against hand-checked ground truth.
 
 Every model gets the same prompt as production (EXTRACTION_PROMPT) and the same
 post-processing (_post_process), so only the model varies. Receipts are sent as a
 upright JPEG to every model; the "app" row runs the app's own parser on the raw
 stored file to check production behaviour end to end.
 
-Usage: python experiments/parse_bench.py [--runs 2] [--models key1,key2]
+"api:" rows call the Anthropic API directly.
+The key comes from ANTHROPIC_API_KEY, the repo's .env (gitignored), or else the app's SSM parameter.
+
+--recheck applies the app's self-check to every row: if the items don't add up to the receipt's
+SUBTOTAL / items-sold count, the model gets one follow-up (receipt_parser._RECHECK_PROMPT).
+
+Usage: python experiments/parse_bench.py [--runs 2] [--models key1,key2] [--recheck]
 Writes experiments/results/parse_<timestamp>.json and prints a summary table.
 """
 import argparse
+import base64
 import copy
 import difflib
 import io
 import json
+import os
 import sys
 import threading
 import time
@@ -28,7 +36,7 @@ from botocore.config import Config
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parent))
 from services import receipt_parser  # noqa: E402
-from services.receipt_parser import EXTRACTION_PROMPT, _post_process  # noqa: E402
+from services.receipt_parser import EXTRACTION_PROMPT, _RECHECK_PROMPT, _post_process, _reconcile  # noqa: E402
 
 DATA = ROOT / "data"
 RESULTS = ROOT / "results"
@@ -36,19 +44,26 @@ RESULTS = ROOT / "results"
 # USD per 1M tokens, US cross-region (us.*) on-demand standard tier.
 # Nova/Claude from the AWS Pricing API (2026-10-05); GPT from AWS model cards / pricing announcements.
 # "app" runs services/receipt_parser.py on the raw stored file, exactly as /api/upload does, so it
-# tracks whatever model and preprocessing the app currently uses (price assumes Sonnet 4.6).
+# tracks whatever model and preprocessing the app currently uses (price assumes Haiku 5.5 on the API).
 # Every other row gets an upright JPEG with EXIF rotation applied.
 # Before the 2026-10-05 fix the app sent raw sideways phone photos to Nova 2 Lite and scored ~15%.
 MODELS = {
-    "app":               (receipt_parser.MODEL_ID, 3.30, 16.50),
+    "app":               (receipt_parser.MODEL_ID, 0.10, 0.50),
     "nova-2-lite":       ("us.amazon.nova-2-lite-v1:0", 0.33, 2.75),
     "nova-pro":          ("us.amazon.nova-pro-v1:0", 0.80, 3.20),
     "claude-haiku-4.5":  ("us.anthropic.claude-haiku-4-5-20251001-v1:0", 1.10, 5.50),
     "claude-sonnet-4.6": ("us.anthropic.claude-sonnet-4-6", 3.30, 16.50),
     # Not enabled on this account yet (AccessDeniedException) -- run with --models once access is granted.
     "claude-sonnet-5.5": ("us.anthropic.claude-sonnet-5-5", 2.20, 11.00),
-    "gpt-6-luna":        ("us.openai.gpt-6-luna", 0.11, 0.55),
+    "claude-haiku-5.5":  ("us.anthropic.claude-haiku-5-5", 0.11, 0.55),
+    "gpt-6-luna":       ("us.openai.gpt-6-luna", 0.11, 0.55),
     "gpt-5.6-terra":     ("us.openai.gpt-5.6-terra", 2.20, 13.20),
+    # Anthropic API (first-party), prices from Anthropic's model table (2026-10-06). Prompts up to
+    # 100K tokens; a receipt is ~2-5K. No temperature is sent: the 5.x models reject non-default values.
+    "api:haiku-5.5":     ("claude-haiku-5-5", 0.10, 0.50),
+    "api:sonnet-5.5":    ("claude-sonnet-5-5", 2.00, 10.00),
+    "api:sonnet-4.6":    ("claude-sonnet-4-6", 3.00, 15.00),
+    "api:opus-5.5":      ("claude-opus-5-5", 4.00, 20.00),
 }
 DEFAULT_MODELS = ["app", "nova-2-lite", "nova-pro",
                   "claude-haiku-4.5", "claude-sonnet-4.6"]
@@ -84,44 +99,85 @@ def extract_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
-class _UsageRecorder:
-    """Wraps the app's bedrock client so we can total usage across its internal calls."""
-    def __init__(self, client):
-        self._client, self._local = client, threading.local()
-
-    def reset(self):
-        self._local.usage = {"inputTokens": 0, "outputTokens": 0}
-
-    def converse(self, **kw):
-        resp = self._client.converse(**kw)
-        for k in self._local.usage:
-            self._local.usage[k] += resp["usage"][k]
-        return resp
+_usage = threading.local()
+_app_create = receipt_parser._create
 
 
-_recorder = _UsageRecorder(receipt_parser._bedrock)
-receipt_parser._bedrock = _recorder
+def _recording_create(messages):
+    """Wraps the app's model call so we can total usage across its internal calls (incl. recheck)."""
+    resp = _app_create(messages)
+    _usage.totals["inputTokens"] += resp.usage.input_tokens
+    _usage.totals["outputTokens"] += resp.usage.output_tokens
+    return resp
+
+
+receipt_parser._create = _recording_create
 
 
 def call_app(path: Path) -> dict:
     """Run the app's parser on the stored file as-is, like /api/upload and /api/reparse."""
     data = path.read_bytes()
-    _recorder.reset()
+    _usage.totals = {"inputTokens": 0, "outputTokens": 0}
     t0 = time.time()
     if data[:4] == b"%PDF":
         parsed = receipt_parser.parse_receipt_pdf(data)
     else:
         parsed = receipt_parser.parse_receipt_image(data)
-    return {"parsed": parsed, "usage": dict(_recorder._local.usage), "seconds": round(time.time() - t0, 2)}
+    return {"parsed": parsed, "usage": dict(_usage.totals), "seconds": round(time.time() - t0, 2)}
 
 
-def call(model_key: str, pdf_path: Path, jpeg: bytes) -> dict:
+_anthropic = None
+_anthropic_lock = threading.Lock()
+
+
+def _anthropic_client():
+    """Anthropic client: ANTHROPIC_API_KEY, else the repo's .env, else the app's SSM key."""
+    global _anthropic
+    with _anthropic_lock:
+        if _anthropic is None:
+            import anthropic
+            key = os.environ.get("ANTHROPIC_API_KEY")
+            env_file = ROOT.parent / ".env"
+            if not key and env_file.exists():
+                for line in env_file.read_text().splitlines():
+                    name, _, value = line.partition("=")
+                    if name.strip().removeprefix("export ").strip() == "ANTHROPIC_API_KEY":
+                        key = value.strip().strip('"').strip("'")
+            _anthropic = (anthropic.Anthropic(api_key=key, max_retries=4) if key
+                          else receipt_parser._load_client())
+        return _anthropic
+
+
+def call(model_key: str, jpeg: bytes, followup: tuple | None = None) -> dict:
+    """One request. followup=(previous call() result, user text) continues that conversation."""
     model_id = MODELS[model_key][0]
-    block = {"image": {"format": "jpeg", "source": {"bytes": jpeg}}}
-    req = dict(modelId=model_id,
-               messages=[{"role": "user", "content": [block, {"text": EXTRACTION_PROMPT}]}],
-               inferenceConfig={"maxTokens": MAX_TOKENS.get(model_key, 16000), "temperature": 0})
     t0 = time.time()
+    if model_key.startswith("api:"):
+        b64 = base64.standard_b64encode(jpeg).decode()
+        messages = [{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
+            {"type": "text", "text": EXTRACTION_PROMPT}]}]
+        if followup:
+            prev, text = followup
+            # Replay the full assistant content (thinking blocks included) unchanged.
+            messages += [{"role": "assistant", "content": prev["content"]},
+                         {"role": "user", "content": [{"type": "text", "text": text}]}]
+        resp = _anthropic_client().messages.create(model=model_id, max_tokens=16000, messages=messages)
+        if resp.stop_reason in ("refusal", "max_tokens"):
+            raise RuntimeError(f"stop_reason={resp.stop_reason}")
+        return {"text": "".join(b.text for b in resp.content if b.type == "text"),
+                "content": resp.content,
+                "usage": {"inputTokens": resp.usage.input_tokens, "outputTokens": resp.usage.output_tokens},
+                "seconds": round(time.time() - t0, 2)}
+
+    block = {"image": {"format": "jpeg", "source": {"bytes": jpeg}}}
+    messages = [{"role": "user", "content": [block, {"text": EXTRACTION_PROMPT}]}]
+    if followup:
+        prev, text = followup
+        messages += [{"role": "assistant", "content": [{"text": prev["text"]}]},
+                     {"role": "user", "content": [{"text": text}]}]
+    req = dict(modelId=model_id, messages=messages,
+               inferenceConfig={"maxTokens": MAX_TOKENS.get(model_key, 16000), "temperature": 0})
     try:
         resp = _bedrock.converse(**req)
     except _bedrock.exceptions.ValidationException as e:
@@ -129,9 +185,34 @@ def call(model_key: str, pdf_path: Path, jpeg: bytes) -> dict:
             raise
         req["inferenceConfig"].pop("temperature")  # some reasoning models reject it
         resp = _bedrock.converse(**req)
-    elapsed = time.time() - t0
     text = "".join(c.get("text", "") for c in resp["output"]["message"]["content"])
-    return {"text": text, "usage": resp["usage"], "seconds": round(elapsed, 2)}
+    return {"text": text, "usage": resp["usage"], "seconds": round(time.time() - t0, 2)}
+
+
+def parse_output(text: str) -> dict:
+    parsed = extract_json(text)
+    parsed["items"] = _post_process(copy.deepcopy(parsed.get("items", [])))
+    return parsed
+
+
+def call_with_recheck(model_key: str, jpeg: bytes, recheck: bool) -> tuple:
+    """Mirror receipt_parser._extract: parse, then one follow-up if the totals don't reconcile."""
+    out = call(model_key, jpeg)
+    parsed = parse_output(out["text"])
+    rechecked = False
+    check = _reconcile(parsed) if recheck else None
+    if check and check["error"] > 0.005:
+        rechecked = True
+        out2 = call(model_key, jpeg, followup=(out, _RECHECK_PROMPT.format(**check)))
+        parsed2 = parse_output(out2["text"])
+        check2 = _reconcile(parsed2)
+        for k in ("inputTokens", "outputTokens"):
+            out["usage"][k] += out2["usage"][k]
+        out["seconds"] = round(out["seconds"] + out2["seconds"], 2)
+        out["text"] += "\n\n--- recheck ---\n" + out2["text"]
+        if check2 and check2["error"] < check["error"]:
+            parsed = parsed2
+    return out, parsed, rechecked
 
 
 def item_sim(p: dict, t: dict) -> float:
@@ -196,24 +277,19 @@ def score(parsed: dict, gt: dict) -> dict:
     }
 
 
-def run_one(model_key, pdf_path, jpeg, gt, run_idx):
+def run_one(model_key, pdf_path, jpeg, gt, run_idx, recheck=False):
     rec = {"model": model_key, "receipt": gt["receipt_date"], "file": pdf_path.name, "run": run_idx}
     try:
-        app_path = model_key == "app"
-        if app_path:
+        if model_key == "app":
             out = call_app(pdf_path)
+            parsed = out["parsed"]  # already post-processed (and rechecked) by the app
         else:
-            out = call(model_key, pdf_path, jpeg)
+            out, parsed, rec["rechecked"] = call_with_recheck(model_key, jpeg, recheck)
         _, in_price, out_price = MODELS[model_key]
         u = out["usage"]
         rec.update(seconds=out["seconds"], input_tokens=u["inputTokens"], output_tokens=u["outputTokens"],
                    cost_usd=round((u["inputTokens"] * in_price + u["outputTokens"] * out_price) / 1e6, 6),
                    raw=out.get("text", ""))
-        if app_path:
-            parsed = out["parsed"]  # already post-processed by the app
-        else:
-            parsed = extract_json(out["text"])
-            parsed["items"] = _post_process(copy.deepcopy(parsed.get("items", [])))
         rec["parsed"] = parsed
         rec["score"] = score(parsed, gt)
     except Exception as e:
@@ -256,23 +332,37 @@ def summarize(records):
             errs[(r["model"], r["error"][:160])] += 1
     for (m, e), c in errs.items():
         print(f"  {c}x {m}: {e}")
+    rechecks = {m: sum(bool(r.get("rechecked")) for r in rs) for m, rs in rows.items()}
+    if any(rechecks.values()):
+        print("  rechecks fired: " + ", ".join(f"{m} {c}/{len(rows[m])}" for m, c in rechecks.items()))
+    spend = {}
+    for r in records:
+        backend = "Anthropic API" if r["model"].startswith("api:") or r["model"] == "app" else "Bedrock"
+        spend[backend] = spend.get(backend, 0) + r.get("cost_usd", 0)
+    print("  spend this run: " + ", ".join(f"{b} ${v:.4f}" for b, v in spend.items()))
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=2)
     ap.add_argument("--models", default=",".join(DEFAULT_MODELS))
+    ap.add_argument("--recheck", action="store_true",
+                    help="apply the app's subtotal/item-count self-check (one follow-up call) to every row")
     ap.add_argument("--truth", nargs="*", default=sorted(str(f) for f in (DATA / "ground_truth").glob("*.json")),
                     help="ground-truth files (default: all in data/ground_truth/)")
     args = ap.parse_args()
 
     truths = [json.loads(Path(t).read_text()) for t in args.truth]
     models = [m.strip() for m in args.models.split(",")]
+    unknown = [m for m in models if m not in MODELS]
+    if unknown:
+        sys.exit(f"unknown model(s): {', '.join(unknown)}; choose from: {', '.join(MODELS)}")
     files = [(DATA / "files" / f, gt) for gt in truths for f in gt["files"]]
     jpegs = {f: render_jpeg(f) for f, _ in files}
 
-    jobs = [(m, f, jpegs[f], gt, k) for m in models for f, gt in files for k in range(args.runs)]
-    print(f"{len(jobs)} calls: {len(models)} models x {len(files)} photos ({len(truths)} receipts) x {args.runs} runs")
+    jobs = [(m, f, jpegs[f], gt, k, args.recheck) for m in models for f, gt in files for k in range(args.runs)]
+    print(f"{len(jobs)} calls: {len(models)} models x {len(files)} photos ({len(truths)} receipts) x {args.runs} runs"
+          f"{' (+ recheck when totals disagree)' if args.recheck else ''}")
     with ThreadPoolExecutor(max_workers=8) as pool:
         records = list(pool.map(lambda j: run_one(*j), jobs))
 

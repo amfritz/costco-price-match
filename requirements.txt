@@ -10,3 +10,4 @@ pillow
 PyMuPDF
 bedrock-agentcore
 resend
+anthropic

@@ -11,7 +11,7 @@ Forked from [the original Canadian version](https://github.com/waltsims/costco-p
 ## How It Works
 
 1. Upload receipt PDFs or snap a photo with your phone's camera
-2. Claude Sonnet 4.6 on Amazon Bedrock parses every line item, price, item number, and TPD (Temporary Price Drop)
+2. Claude Haiku 5.5 (Anthropic API) parses every line item, price, item number, and TPD (Temporary Price Drop)
 3. Scrapers pull current deals from Reddit r/Costco, Reddit r/CostcoDeals, KrazyCouponLady, and CostcoFan
 4. AI cross-references your purchases against active deals
 5. Weekly agent emails you a report with price adjustment opportunities and TPD savings already applied
@@ -32,7 +32,7 @@ Forked from [the original Canadian version](https://github.com/waltsims/costco-p
 
 - **Web Frontend**: Static HTML on AWS Amplify with Cognito email OTP authentication
 - **API**: API Gateway HTTP API → Lambda (FastAPI + Mangum), streaming analysis responses
-- **AI**: Claude Sonnet 4.6 for receipt parsing, Amazon Nova 2 Lite for analysis
+- **AI**: Claude Haiku 5.5 (Anthropic API) for receipt parsing, Amazon Nova 2 Lite (Bedrock) for analysis
 - **Automation**: AgentCore Runtime triggered by EventBridge Scheduler universal target (no Lambda middleman), Resend for email
 - **Storage**: DynamoDB (receipts + deals), S3 (receipt files with presigned URLs)
 - **Infrastructure**: CDK (TypeScript), 3 stacks, deploy to any region
@@ -141,12 +141,13 @@ npx cdk destroy CostcoScannerCommon -c region=us-east-1
 
 ## Cost
 
-Under $1/month for personal use. Bedrock tokens are the main cost: receipt parsing is ~$0.016 per receipt with Sonnet 4.6, plus ~$0.10-0.20/week for Nova analysis. Lambda, SES, DynamoDB, API Gateway, and Amplify fall within free tier. All resources are tagged with `project: costco-price-match` for cost tracking in Cost Explorer.
+Under $1/month for personal use. Model tokens are the main cost: receipt parsing is ~$0.0013 per receipt with Haiku 5.5, plus ~$0.10-0.20/week of Bedrock Nova analysis. Lambda, SES, DynamoDB, API Gateway, and Amplify fall within free tier. All resources are tagged with `project: costco-price-match` for cost tracking in Cost Explorer.
 
 ## Built With
 
 - [Claude Code](https://claude.ai/code) — AI coding assistant by Anthropic (US adaptation)
 - [Kiro CLI](https://kiro.dev) — AI coding assistant by AWS (original version)
-- [Amazon Bedrock](https://aws.amazon.com/bedrock/) — Claude Sonnet 4.6 + Nova 2 Lite
+- [Anthropic API](https://platform.claude.com/) — Claude Haiku 5.5 (receipt parsing)
+- [Amazon Bedrock](https://aws.amazon.com/bedrock/) — Nova 2 Lite (analysis)
 - [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/) — Runtime for the weekly agent
 - [AWS CDK](https://aws.amazon.com/cdk/) — Infrastructure as code
