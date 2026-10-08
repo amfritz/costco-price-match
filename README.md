@@ -41,7 +41,7 @@ Forked from [the original Canadian version](https://github.com/waltsims/costco-p
 
 - AWS CLI configured with credentials
 - Node.js 18+ and npm
-- Docker running
+- Docker running (on macOS, Colima works: `brew install colima docker docker-buildx && colima start`)
 - Python 3.12+
 
 ## Run Locally
@@ -70,9 +70,17 @@ NOTIFY_EMAIL=your-email@example.com ./deploy.sh
 ./deploy.sh --static-only
 ```
 
-`NOTIFY_EMAIL` is only required on the first deploy of AgentCore. After that, recipients and the API key live in SSM Parameter Store and can be updated without redeploying.
+`NOTIFY_EMAIL` is only required on the first deploy of AgentCore. After that, recipients and the Resend API key live in SSM Parameter Store and can be updated without redeploying.
 
 ### SSM Parameter Store
+
+**Anthropic API key** — required for receipt parsing. Create it by hand (CDK doesn't manage it) as a SecureString before uploading receipts:
+```bash
+# Set or rotate (get a key at platform.claude.com) -- no redeploy needed
+aws ssm put-parameter --name /costco-scanner/anthropic-api-key \
+  --value "sk-ant-YOUR_KEY_HERE" --type SecureString --overwrite
+```
+The key used here is a 30-day key. The web app shows an amber banner once the parameter is 25+ days old, and a red one if parsing fails (key rejected, out of credit, API outage). Overwriting the parameter clears the warning; the Lambda re-reads SSM when a key is rejected.
 
 The weekly agent reads these two parameters at runtime:
 
@@ -135,7 +143,7 @@ npx cdk destroy CostcoScannerCommon -c region=us-east-1
 
 - **Custom domain SSL** — `costco.dunkinspeeps.com` is configured and working. Consider moving the main domain DNS to Route53 for tighter integration.
 - **Scraper resilience** — Deal sources change HTML structure without warning. The per-source observability helps detect failures, but scrapers may need periodic updates when sites change.
-- **Receipt parsing accuracy** — Camera photos of handheld receipts can produce OCR errors (wrong dates, missed items). The edit/delete item UI helps correct these, but improving the prompt or adding a second-pass validation could reduce manual fixes.
+- **Receipt parsing accuracy** — Parsing self-checks against the receipt's printed subtotal and item count and asks the model again when they disagree. `experiments/parse_bench.py` scores models against hand-checked answer keys, but only two receipts have keys so far; more (long receipts, quantities, coupons) would make model comparisons more trustworthy.
 - **Per-user data isolation** — All authenticated users share all receipts. Fine for family use with signup disabled, but would need row-level filtering (e.g., by Cognito sub) if opened to more users.
 - **Activate cost allocation tag** — The `project: costco-price-match` tag is on all resources but needs to be activated in AWS Billing as a cost allocation tag (takes 24h after first tagging) to filter in Cost Explorer.
 

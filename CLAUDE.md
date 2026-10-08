@@ -56,13 +56,20 @@ npx cdk destroy CostcoScannerAmplify -c region=us-east-1
 npx cdk destroy CostcoScannerCommon -c region=us-east-1
 ```
 
+### Receipt parsing benchmark
+```bash
+python experiments/parse_bench.py --models app --runs 3            # the app's own parser
+python experiments/parse_bench.py --models app,api:sonnet-5.5 --recheck  # compare models
+```
+Scores parsing against hand-checked answer keys in `experiments/data/ground_truth/` with the photos in `experiments/data/files/`. Both live only on this machine (gitignored — they contain member and card numbers); `experiments/export_data.py` re-downloads receipts from DynamoDB/S3. Every run calls real models and costs money (the summary prints the spend). Use it to check any change to `receipt_parser.py` or its prompt.
+
 No automated test suite exists.
 
 ## Architecture
 
 ### Two entry points
 - **`app.py`** — FastAPI web API, runs on Lambda (ARM64, Mangum adapter) behind API Gateway v2 with Cognito JWT auth. Serves uploads (PDF + images), receipt CRUD, price scanning, and SSE streaming analysis.
-- **`agent.py`** — AgentCore Runtime entry point, triggered by EventBridge Scheduler every Friday 9pm ET. Scans deals, runs analysis, emails HTML report via SES.
+- **`agent.py`** — AgentCore Runtime entry point, triggered by EventBridge Scheduler every Friday 9pm ET. Scans deals, runs analysis, emails HTML report via Resend.
 
 ### Backend services (`services/`)
 - **`db.py`** — DynamoDB (CostcoReceipts, CostcoPriceDrops tables) + S3 (receipt files with presigned URLs). Deduplicates receipts by file hash.
@@ -71,7 +78,7 @@ No automated test suite exists.
 - **`analyzer.py`** — Strands Agents framework with Nova 2 Lite. Tool-based matching: exact item number → partial item number → keyword overlap. Streams results via SSE.
 
 ### Infrastructure (`infra/`, AWS CDK TypeScript)
-Three stacks: **CommonStack** (DynamoDB, S3, ECR), **AmplifyStack** (Cognito with email OTP, Lambda, API Gateway, Amplify hosting), **AgentCoreStack** (runtime, EventBridge scheduler, SES).
+Three stacks: **CommonStack** (DynamoDB, S3, ECR), **AmplifyStack** (Cognito with email OTP, Lambda, API Gateway, Amplify hosting), **AgentCoreStack** (runtime, EventBridge scheduler, SSM parameters for Resend). Docker builds run on Colima locally.
 
 ### Frontend
 - **Web** (`static/index.html`) — Single HTML file, SPA with passwordless email OTP auth (Cognito USER_AUTH flow, no SDK dependency). Config injected at deploy via `static/config.js`. Mobile-responsive with camera capture for receipt photos.
@@ -84,3 +91,4 @@ Three stacks: **CommonStack** (DynamoDB, S3, ECR), **AmplifyStack** (Cognito wit
 - Price scanner uses random User-Agent rotation and 1-second rate limiting between sources
 - CORS locked to `https://costco.dunkinspeeps.com` + `localhost:8000`
 - All resources tagged with `project: costco-price-match` for cost tracking
+- `agentcore.Dockerfile` does `COPY . .`, so `.dockerignore` must keep `.env` (API key), `.venv/`, `experiments/` and receipt photos out of the images — add any new local-only secret or data path there too
