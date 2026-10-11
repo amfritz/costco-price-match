@@ -132,7 +132,7 @@ def _friendly(e: anthropic.APIError) -> ParserUnavailable:
     return ParserUnavailable(msg)
 
 
-def _with_client(fn):
+def with_client(fn):
     """Run fn(client); on a rejected key, re-read SSM once in case the key was rotated."""
     for refresh in (False, True):
         try:
@@ -145,7 +145,7 @@ def _with_client(fn):
 
 
 def _create(messages: list):
-    return _with_client(lambda c: c.messages.create(model=MODEL_ID, max_tokens=16000, messages=messages))
+    return with_client(lambda c: c.messages.create(model=MODEL_ID, max_tokens=16000, messages=messages))
 
 
 def status() -> dict:
@@ -162,7 +162,7 @@ def status() -> dict:
     if time.time() - _status_ok_at < 300:
         return result  # key validated in the last 5 minutes
     try:
-        _with_client(lambda c: c.models.retrieve(MODEL_ID))
+        with_client(lambda c: c.models.retrieve(MODEL_ID))
         _status_ok_at = time.time()
     except ParserUnavailable as e:
         result.update(ok=False, problem=str(e))

@@ -3,7 +3,6 @@ uvicorn
 python-multipart
 boto3
 botocore[crt]
-strands-agents
 beautifulsoup4
 requests
 pillow

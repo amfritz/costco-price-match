@@ -113,24 +113,7 @@ export class AmplifyStack extends cdk.Stack {
             }),
           ],
         }),
-        BedrockAccess: new iam.PolicyDocument({
-          statements: [
-            new iam.PolicyStatement({
-              effect: iam.Effect.ALLOW,
-              actions: [
-                'bedrock:InvokeModel',
-                'bedrock:InvokeModelWithResponseStream',
-                'bedrock:Converse',
-                'bedrock:ConverseStream',
-              ],
-              resources: [
-                'arn:aws:bedrock:*::foundation-model/*',
-                `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
-              ],
-            }),
-          ],
-        }),
-        // Receipt parsing calls the Anthropic API with a key kept in SSM (SecureString, created by
+        // Receipt parsing and deal matching call the Anthropic API with a key kept in SSM (SecureString, created by
         // hand so it can be rotated without a deploy). The aws/ssm KMS key needs no extra grant.
         AnthropicKeyAccess: new iam.PolicyDocument({
           statements: [

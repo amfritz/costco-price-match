@@ -12,7 +12,7 @@ Forked from [the original Canadian version](https://github.com/waltsims/costco-p
 
 1. Upload receipt PDFs or snap a photo with your phone's camera
 2. Claude Haiku 5.5 (Anthropic API) parses every line item, price, item number, and TPD (Temporary Price Drop)
-3. Scrapers pull current deals from Reddit r/Costco, Reddit r/CostcoDeals, KrazyCouponLady, and CostcoFan
+3. Scrapers pull current deals from Costco's Warehouse Savings page, Costco Insider, Reddit r/Costco and r/CostcoDeals, KrazyCouponLady, and CostcoFan
 4. AI cross-references your purchases against active deals
 5. Weekly agent emails you a report with price adjustment opportunities and TPD savings already applied
 
@@ -32,7 +32,7 @@ Forked from [the original Canadian version](https://github.com/waltsims/costco-p
 
 - **Web Frontend**: Static HTML on AWS Amplify with Cognito email OTP authentication
 - **API**: API Gateway HTTP API → Lambda (FastAPI + Mangum), streaming analysis responses
-- **AI**: Claude Haiku 5.5 (Anthropic API) for receipt parsing, Amazon Nova 2 Lite (Bedrock) for analysis
+- **AI**: Claude Haiku 5.5 (Anthropic API) for receipt parsing and for checking that a deal is the same product as a receipt item
 - **Automation**: AgentCore Runtime triggered by EventBridge Scheduler universal target (no Lambda middleman), Resend for email
 - **Storage**: DynamoDB (receipts + deals), S3 (receipt files with presigned URLs)
 - **Infrastructure**: CDK (TypeScript), 3 stacks, deploy to any region
@@ -71,6 +71,25 @@ NOTIFY_EMAIL=your-email@example.com ./deploy.sh
 ```
 
 `NOTIFY_EMAIL` is only required on the first deploy of AgentCore. After that, recipients and the Resend API key live in SSM Parameter Store and can be updated without redeploying.
+
+> **Gotcha: redeploying AgentCore can overwrite the recipient list.** The stack builds `/costco-scanner/notify-emails` and the email's from-address from the deploy-time values `notifyEmail`, `notifyEmails` and `resendFromEmail`. CloudFormation rewrites the parameter whenever the value passed differs from the last deploy. `NOTIFY_EMAIL=... ./deploy.sh` passes only `notifyEmail`, so on a redeploy it resets the list to that one address and changes the from-address to it. To redeploy (for example after code changes), run `./deploy.sh` with no `NOTIFY_EMAIL` for the web app, then deploy AgentCore by itself with all three values exactly as last deployed:
+>
+> ```bash
+> # The values the deployed stack was built with
+> aws cloudformation get-template --stack-name CostcoScannerAgentCore --region us-east-1 \
+>   --query TemplateBody --output json | grep -o '[A-Za-z0-9._%+-]*@[A-Za-z0-9.-]*' | sort -u
+> aws ssm get-parameter --name /costco-scanner/notify-emails --query Parameter.Value --output text
+>
+> cd infra && npx cdk diff CostcoScannerAgentCore -c region=us-east-1 \
+>   -c notifyEmail=you@example.com -c notifyEmails=you@example.com,other@example.com \
+>   -c resendFromEmail=reports@your-domain.com
+> # Deploy only if the diff doesn't list the NotifyEmails parameter, then:
+> npx cdk deploy CostcoScannerAgentCore --require-approval never -c region=us-east-1 \
+>   -c notifyEmail=you@example.com -c notifyEmails=you@example.com,other@example.com \
+>   -c resendFromEmail=reports@your-domain.com
+> ```
+>
+> The Resend API key is not affected: its template value is a fixed placeholder, so the stack never rewrites it.
 
 ### SSM Parameter Store
 
@@ -149,13 +168,12 @@ npx cdk destroy CostcoScannerCommon -c region=us-east-1
 
 ## Cost
 
-Under $1/month for personal use. Model tokens are the main cost: receipt parsing is ~$0.0013 per receipt with Haiku 5.5, plus ~$0.10-0.20/week of Bedrock Nova analysis. Lambda, SES, DynamoDB, API Gateway, and Amplify fall within free tier. All resources are tagged with `project: costco-price-match` for cost tracking in Cost Explorer.
+Under $1/month for personal use. Model tokens are the main cost: receipt parsing is ~$0.0013 per receipt with Haiku 5.5, and well under a cent per analysis, since only name-based matches go to the model. Lambda, SES, DynamoDB, API Gateway, and Amplify fall within free tier. All resources are tagged with `project: costco-price-match` for cost tracking in Cost Explorer.
 
 ## Built With
 
 - [Claude Code](https://claude.ai/code) — AI coding assistant by Anthropic (US adaptation)
 - [Kiro CLI](https://kiro.dev) — AI coding assistant by AWS (original version)
-- [Anthropic API](https://platform.claude.com/) — Claude Haiku 5.5 (receipt parsing)
-- [Amazon Bedrock](https://aws.amazon.com/bedrock/) — Nova 2 Lite (analysis)
+- [Anthropic API](https://platform.claude.com/) — Claude Haiku 5.5 (receipt parsing, deal matching)
 - [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/) — Runtime for the weekly agent
 - [AWS CDK](https://aws.amazon.com/cdk/) — Infrastructure as code

@@ -140,15 +140,18 @@ def update_receipt_items(receipt_id: str, items: list, store: str = "", receipt_
 
 # --- Price Drops ---
 
-def put_price_drop(item_name: str, sale_price: str, original_price: str = "",
+def put_price_drop(item_name: str, sale_price: str = "", original_price: str = "",
                    promo_start: str = "", promo_end: str = "", source: str = "manual",
-                   link: str = "", item_number: str = "") -> dict:
+                   link: str = "", item_number: str = "", discount: str = "") -> dict:
+    """sale_price is the promo price; discount is the amount off ("$4 off"). Either may be empty.
+    item_number may hold several comma-separated numbers when one deal covers variants."""
     drop = {
         "item_id": str(uuid.uuid4()),
         "item_name": item_name,
         "item_number": item_number,
         "original_price": original_price,
         "sale_price": sale_price,
+        "discount": discount,
         "promo_start": promo_start,
         "promo_end": promo_end,
         "source": source,
@@ -160,7 +163,13 @@ def put_price_drop(item_name: str, sale_price: str, original_price: str = "",
 
 
 def get_all_price_drops() -> list:
-    return _ddb.Table(PRICE_DROPS_TABLE).scan()["Items"]
+    table = _ddb.Table(PRICE_DROPS_TABLE)
+    resp = table.scan()
+    items = resp["Items"]
+    while "LastEvaluatedKey" in resp:
+        resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+        items.extend(resp["Items"])
+    return items
 
 
 def clear_price_drops():
@@ -169,23 +178,6 @@ def clear_price_drops():
 
 def delete_price_drop(item_id: str):
     _ddb.Table(PRICE_DROPS_TABLE).delete_item(Key={"item_id": item_id})
-
-
-def item_exists(item_name: str, source: str, promo_end: str = "") -> bool:
-    try:
-        expr = "item_name = :name AND #src = :source"
-        vals = {":name": item_name, ":source": source}
-        if promo_end:
-            expr += " AND promo_end = :pe"
-            vals[":pe"] = promo_end
-        resp = _ddb.Table(PRICE_DROPS_TABLE).scan(
-            FilterExpression=expr,
-            ExpressionAttributeNames={"#src": "source"},
-            ExpressionAttributeValues=vals,
-        )
-        return len(resp["Items"]) > 0
-    except Exception:
-        return False
 
 
 def get_cached_deals_count() -> int:

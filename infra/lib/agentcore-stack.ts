@@ -54,12 +54,10 @@ export class AgentCoreStack extends cdk.Stack {
               resources: [commonStack.receiptsBucket.bucketArn, `${commonStack.receiptsBucket.bucketArn}/*`],
             }),
             new iam.PolicyStatement({
-              actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream', 'bedrock:Converse', 'bedrock:ConverseStream'],
-              resources: ['arn:aws:bedrock:*::foundation-model/*', `arn:aws:bedrock:*:${this.account}:inference-profile/*`],
-            }),
-            new iam.PolicyStatement({
               actions: ['ssm:GetParameter'],
-              resources: [resendKeyParam.parameterArn, notifyEmailsParam.parameterArn],
+              // The Anthropic key (deal matching) is created by hand, not by CDK: see amplify-stack.ts.
+              resources: [resendKeyParam.parameterArn, notifyEmailsParam.parameterArn,
+                `arn:aws:ssm:${this.region}:${this.account}:parameter/costco-scanner/anthropic-api-key`],
             }),
           ],
         }),
