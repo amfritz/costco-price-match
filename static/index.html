@@ -857,15 +857,17 @@ function renderDeals(deals) {
   let html = '<div class="deals-grid">';
   deals.forEach(d => {
     const link = d.link || '';
-    const name = link ? `<a href="${link}" target="_blank">${d.item_name}</a>` : d.item_name;
-    const exp = d.promo_end ? `<span class="expiry">⏰ ${d.promo_end}</span>` : '';
-    const num = d.item_number ? `<span class="item-num">#${d.item_number}</span>` : '';
+    const name = link ? `<a href="${escHtml(safeUrl(link))}" target="_blank" rel="noopener">${escHtml(d.item_name)}</a>` : escHtml(d.item_name);
+    const exp = d.promo_end ? `<span class="expiry">⏰ ${escHtml(d.promo_end)}</span>` : '';
+    const num = d.item_number ? `<span class="item-num">#${escHtml(d.item_number)}</span>` : '';
+    // A deal has a sale price, a discount ("$4 off"), or both
+    const price = [d.sale_price ? `$${d.sale_price}` : '', d.discount ? `$${d.discount} off` : ''].filter(Boolean).join(' · ');
     const src = d.source.replace('reddit.com/r/','r/').replace('thekrazycouponlady.com','KCL').replace('.com','');
     html += `<div class="deal" style="position:relative">
       <button class="deal-del" onclick="deleteDeal('${d.item_id}',this)" title="Remove deal">✕</button>
       <div class="deal-name">${name}</div>
       <div class="deal-meta">
-        <span class="price">$${d.sale_price}</span>${num}<span class="source-tag">${src}</span>${exp}
+        <span class="price">${escHtml(price)}</span>${num}<span class="source-tag">${src}</span>${exp}
       </div>
     </div>`;
   });
@@ -900,7 +902,7 @@ async function runAnalysis() {
   const ids = getSelectedReceiptIds();
   const label = ids ? `${ids.length} receipt${ids.length>1?'s':''}` : 'all receipts';
   setStatus('analysisStatus', `⏳ Analyzing ${label}...`, 'load');
-  $('analysis').innerHTML = '<div style="color:var(--muted);font-size:.85em" id="streamStatus">🔄 Starting agent...</div><div id="streamText"></div>';
+  $('analysis').innerHTML = '<div style="color:var(--muted);font-size:.85em" id="streamStatus">🔄 Starting analysis...</div><div id="streamText"></div>';
 
   const params = new URLSearchParams();
   if (ids) params.set('receipt_ids', ids.join(','));
@@ -937,12 +939,9 @@ async function runAnalysis() {
               $('streamText').innerHTML = renderMarkdown(fullText);
               const ss = $('streamStatus');
               if (ss) ss.remove();
-            } else if (msg.type === 'tool') {
-              fullText = '';
-              const st = $('streamText');
-              if (st) st.innerHTML = '';
+            } else if (msg.type === 'status') {
               const ss = $('streamStatus');
-              if (ss) ss.textContent = `🔧 Calling ${msg.name}...`;
+              if (ss) ss.textContent = msg.text;
             } else if (msg.type === 'done') {
               $('analysis').innerHTML = renderMarkdown(msg.text);
               let statusHtml = '✅ Analysis complete';
@@ -969,12 +968,9 @@ async function runAnalysis() {
         $('streamText').innerHTML = renderMarkdown(fullText);
         const ss = $('streamStatus');
         if (ss) ss.remove();
-      } else if (msg.type === 'tool') {
-        fullText = '';
-        const st = $('streamText');
-        if (st) st.innerHTML = '';
+      } else if (msg.type === 'status') {
         const ss = $('streamStatus');
-        if (ss) ss.textContent = `🔧 Calling ${msg.name}...`;
+        if (ss) ss.textContent = msg.text;
       } else if (msg.type === 'done') {
         es.close();
         $('analysis').innerHTML = renderMarkdown(msg.text);

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Costco Receipt Scanner & Price Match Agent — AI-powered tool that scans Costco receipts (PDF or camera photo), cross-references purchases against active US deals from 5 sources, and identifies price adjustment opportunities. Includes a web UI and a weekly automated email agent.
+Costco Receipt Scanner & Price Match Agent — AI-powered tool that scans Costco receipts (PDF or camera photo), cross-references purchases against active US deals from 7 sources, and identifies price adjustment opportunities. Includes a web UI and a weekly automated email agent.
 
 BYOI (Bring Your Own Infrastructure) model: users deploy CDK to their own AWS account. No SaaS backend.
 
@@ -29,7 +29,7 @@ After AgentCore is deployed, recipients and Resend API key live in SSM — no re
 - `/costco-scanner/resend-api-key` (SecureString) — Resend API key
 - `/costco-scanner/notify-emails` (String) — comma-separated recipient list
 
-Receipt parsing uses a 30-day Anthropic API key, created by hand in SSM (not by CDK) and rotated by overwriting it — no redeploy; the Lambda re-reads SSM when a key is rejected:
+Receipt parsing and deal matching use a 30-day Anthropic API key, created by hand in SSM (not by CDK) and rotated by overwriting it — no redeploy; the Lambda and the AgentCore runtime re-read SSM when a key is rejected:
 - `/costco-scanner/anthropic-api-key` (SecureString) — Anthropic API key
 
 The web UI shows a red banner when parsing is down (key rejected, out of credit, API outage) and an amber one once the parameter is 25+ days old (`GET /api/parser-status`).
@@ -74,8 +74,8 @@ No automated test suite exists.
 ### Backend services (`services/`)
 - **`db.py`** — DynamoDB (CostcoReceipts, CostcoPriceDrops tables) + S3 (receipt files with presigned URLs). Deduplicates receipts by file hash.
 - **`receipt_parser.py`** — Parses receipts with Claude Haiku 5.5 on the Anthropic API (not Bedrock — the 5.x models aren't enabled there for this account), then self-checks the items against the receipt's printed subtotal and item count, asking once more if they disagree. API failures raise `ParserUnavailable` with a UI-ready message (503). Photos are EXIF-rotated upright and downscaled first (phone photos are stored sideways; sending raw pixels wrecked accuracy); PDFs are rendered to page images. Post-processes TPD merging, item number extraction with OCR correction (O→0, B→8). Model choice is backed by `experiments/parse_bench.py`.
-- **`price_scanner.py`** — Scrapes 5 US deal sources (Reddit r/Costco, Reddit r/CostcoDeals, KCL Costco Deals, KCL Coupon Book, CostcoFan). Returns `(deals, source_results)` tuple for per-source observability. Caches per calendar day, deduplicates by (item_name, promo_end).
-- **`analyzer.py`** — Strands Agents framework with Nova 2 Lite. Tool-based matching: exact item number → partial item number → keyword overlap. Streams results via SSE.
+- **`price_scanner.py`** — Scrapes US deal sources (costco.com Warehouse Savings — the authoritative one, with item numbers and dates — plus Costco Insider, Reddit r/Costco + r/CostcoDeals via one RSS search, KCL Costco Deals, KCL Coupon Book, CostcoFan). A deal has a `sale_price`, a `discount` ("$4 off" / "Save $4" — never store a discount as a price), or both; `_prices()` does that parsing for free text. CostcoFan is mostly reviews, so only sale-announcing titles count, priced from the title, never the article body. Reddit's .json API returns 403 and its RSS rate-limits (429), so keep Reddit to one request. Returns `(deals, source_results)` tuple for per-source observability. Caches per calendar day, deduplicates by (item_name, promo_end).
+- **`analyzer.py`** — Code builds the candidates and does all the arithmetic; Claude Haiku 5.5 (Anthropic API, same SSM key via `receipt_parser.with_client`) only judges whether a name-similar deal is the same product. A deal must have run within 30 days after the purchase (undated forum deals count for 14 days after posting). Exact item-number matches skip the model; a deal listing *other* item numbers is never a name match. Savings = paid − sale price, or the discount if no TPD was applied. The report tables are built in code ("Match" column shows Item # or the deal's name). Streams one status event, then the report, via SSE.
 
 ### Infrastructure (`infra/`, AWS CDK TypeScript)
 Three stacks: **CommonStack** (DynamoDB, S3, ECR), **AmplifyStack** (Cognito with email OTP, Lambda, API Gateway, Amplify hosting), **AgentCoreStack** (runtime, EventBridge scheduler, SSM parameters for Resend). Docker builds run on Colima locally.
