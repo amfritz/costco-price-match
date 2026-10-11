@@ -72,6 +72,25 @@ NOTIFY_EMAIL=your-email@example.com ./deploy.sh
 
 `NOTIFY_EMAIL` is only required on the first deploy of AgentCore. After that, recipients and the Resend API key live in SSM Parameter Store and can be updated without redeploying.
 
+> **Gotcha: redeploying AgentCore can overwrite the recipient list.** The stack builds `/costco-scanner/notify-emails` and the email's from-address from the deploy-time values `notifyEmail`, `notifyEmails` and `resendFromEmail`. CloudFormation rewrites the parameter whenever the value passed differs from the last deploy. `NOTIFY_EMAIL=... ./deploy.sh` passes only `notifyEmail`, so on a redeploy it resets the list to that one address and changes the from-address to it. To redeploy (for example after code changes), run `./deploy.sh` with no `NOTIFY_EMAIL` for the web app, then deploy AgentCore by itself with all three values exactly as last deployed:
+>
+> ```bash
+> # The values the deployed stack was built with
+> aws cloudformation get-template --stack-name CostcoScannerAgentCore --region us-east-1 \
+>   --query TemplateBody --output json | grep -o '[A-Za-z0-9._%+-]*@[A-Za-z0-9.-]*' | sort -u
+> aws ssm get-parameter --name /costco-scanner/notify-emails --query Parameter.Value --output text
+>
+> cd infra && npx cdk diff CostcoScannerAgentCore -c region=us-east-1 \
+>   -c notifyEmail=you@example.com -c notifyEmails=you@example.com,other@example.com \
+>   -c resendFromEmail=reports@your-domain.com
+> # Deploy only if the diff doesn't list the NotifyEmails parameter, then:
+> npx cdk deploy CostcoScannerAgentCore --require-approval never -c region=us-east-1 \
+>   -c notifyEmail=you@example.com -c notifyEmails=you@example.com,other@example.com \
+>   -c resendFromEmail=reports@your-domain.com
+> ```
+>
+> The Resend API key is not affected: its template value is a fixed placeholder, so the stack never rewrites it.
+
 ### SSM Parameter Store
 
 **Anthropic API key** — required for receipt parsing. Create it by hand (CDK doesn't manage it) as a SecureString before uploading receipts:
